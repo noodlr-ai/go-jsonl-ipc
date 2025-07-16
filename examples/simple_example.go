@@ -55,10 +55,12 @@ func main() {
 			log.Fatalf("Ping response is nil")
 			return
 		}
-		s, ok := msg.Result.(string)
-		if !ok {
+
+		s, err := jsonlipc.GetTypedResult[string](msg)
+		if err != nil {
 			log.Fatalf("Ping response is not a string: %v", msg.Result)
 		}
+
 		if s != "pong" {
 			log.Fatalf("Unexpected ping response: %v", s)
 		}

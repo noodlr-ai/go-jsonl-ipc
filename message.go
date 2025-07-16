@@ -30,6 +30,32 @@ type Message struct {
 	Error  *Error      `json:"error,omitempty"`  // Error information
 }
 
+// GetTypeResult is a standalone generic function because Golang does not support generic methods
+func GetTypedResult[T any](m *Message) (T, error) {
+	var zero T
+	if m.Result == nil {
+		return zero, fmt.Errorf("no result data")
+	}
+
+	// Try direct type assertion first (fastest path for simple types)
+	if result, ok := m.Result.(T); ok {
+		return result, nil
+	}
+
+	// Fall back to marshal/unmarshal for complex conversions
+	data, err := json.Marshal(m.Result)
+	if err != nil {
+		return zero, fmt.Errorf("failed to marshal result: %w", err)
+	}
+
+	var result T
+	if err := json.Unmarshal(data, &result); err != nil {
+		return zero, fmt.Errorf("failed to unmarshal result: %w", err)
+	}
+
+	return result, nil
+}
+
 // Error represents an error in the IPC communication
 type Error struct {
 	Code    int    `json:"code"`           // Error code
