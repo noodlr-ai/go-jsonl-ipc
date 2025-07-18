@@ -42,7 +42,7 @@ func (s *Stream) ReadMessage() (*Message, error) {
 
 	var msg Message
 	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil, fmt.Errorf("failed to unmarshal message: %w", err)
+		return nil, fmt.Errorf("(warning) improperly formed message: %s", string(line))
 	}
 
 	return &msg, nil
@@ -93,7 +93,7 @@ func (s *Stream) ReadChannel() (<-chan *Message, <-chan error) {
 				if err != io.EOF {
 					errChan <- err
 				}
-				return // Note: we may need to handle EOF differently if the Python process unexpectedly terminates
+				continue // Note: we may need to handle EOF differently if the Python process unexpectedly terminates
 			}
 			msgChan <- msg
 		}

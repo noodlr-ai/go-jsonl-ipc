@@ -242,9 +242,7 @@ func (c *Client) processMessages() {
 			c.handleMessage(msg)
 		case err := <-errChan:
 			if err != nil {
-				// Handle error - for now just continue
-				// In a more advanced implementation, you might want to
-				// provide error callbacks or restart the worker
+				fmt.Println(err)
 				continue
 			}
 			return
