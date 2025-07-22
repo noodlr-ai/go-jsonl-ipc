@@ -3,8 +3,8 @@
 Example usage of the JSONL IPC Worker library.
 Shows different ways to use the worker in external modules.
 """
-
-from worker import JSONLWorker
+# Installed via `pip install git+https://github.com/noodlr-ai/py-jsonl-ipc.git@v0.0.3`
+from jsonlipc import JSONLWorker
 
 # Method 1: Using function-based handlers
 def handle_math_add(request_id, params):

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"log"
+	"os"
 	"sync"
 	"time"
 
@@ -11,8 +12,14 @@ import (
 
 func main() {
 	// Configure the Python worker
+	homeDir, osErr := os.UserHomeDir()
+	if osErr != nil {
+		log.Fatalf("Failed to get user home directory: %v", osErr)
+	}
+	pythonPath := fmt.Sprintf("%s/.pyenv/versions/3.13.5/bin/python", homeDir)
+
 	config := jsonlipc.WorkerConfig{
-		PythonPath: "python3",
+		PythonPath: pythonPath,
 		ScriptPath: "examples/python_client.py",
 		Timeout:    30 * time.Second,
 	}
@@ -102,4 +109,23 @@ func main() {
 
 	fmt.Println("Waiting for add response...")
 	wg.Wait()
+
+	wg.Add(1)
+	_, err = client.SendRequestWithTimeoutAndHandler("shutdown", nil, 0, func(msg *jsonlipc.Message, err error) {
+		if err != nil {
+			log.Fatalf("Shutdown failed: %v", err)
+		}
+		if msg == nil {
+			log.Fatalf("Shutdown response is nil")
+			return
+		}
+		fmt.Println("Shutdown successful:", msg.Result)
+		wg.Done()
+	})
+
+	if err != nil {
+		log.Fatalf("Graceful shutdown failed: %v", err)
+	}
+	wg.Wait()
+
 }

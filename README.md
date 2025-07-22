@@ -17,3 +17,10 @@ A Go package for communicating with Python processes using JSON Lines (JSONL) ov
 go mod init your-project
 go get noodlr-ai/go-jsonl-ipc
 ```
+
+# Tagging
+
+```
+git tag v0.0.x
+git push origin v0.0.3
+```

@@ -74,6 +74,7 @@ func (c *Client) Stop() error {
 	c.reqContexts = make(map[string]*RequestContext)
 	c.reqContextsMutex.Unlock()
 
+	// Stop the worker
 	return c.worker.Stop()
 }
 
