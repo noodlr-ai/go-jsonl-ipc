@@ -26,12 +26,12 @@ func TestMessage(t *testing.T) {
 	if resp.Type != MessageTypeResponse {
 		t.Errorf("Expected type '%s', got '%s'", MessageTypeResponse, resp.Type)
 	}
-	if resp.Result != "pong" {
-		t.Errorf("Expected result 'pong', got '%v'", resp.Result)
+	if resp.Data != "pong" {
+		t.Errorf("Expected result 'pong', got '%v'", resp.Data)
 	}
 
 	// Test error message
-	errMsg := NewError("test1", -1, "test error", nil)
+	errMsg := NewIPCError("test1", -1, "test error", nil)
 	if errMsg.ID != "test1" {
 		t.Errorf("Expected ID 'test1', got '%s'", errMsg.ID)
 	}
@@ -298,8 +298,8 @@ func TestMessageResponseHandling(t *testing.T) {
 		if receivedMsg.ID != "test_response" {
 			t.Errorf("Expected response ID 'test_response', got '%s'", receivedMsg.ID)
 		}
-		if receivedMsg.Result != "test result" {
-			t.Errorf("Expected result 'test result', got '%v'", receivedMsg.Result)
+		if receivedMsg.Data != "test result" {
+			t.Errorf("Expected result 'test result', got '%v'", receivedMsg.Data)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Error("Response was not received on channel")

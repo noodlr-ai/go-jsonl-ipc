@@ -46,15 +46,18 @@ func NewClient(config WorkerConfig) *Client {
 }
 
 // Start starts the client and the underlying Python worker
-func (c *Client) Start() error {
-	if err := c.worker.Start(); err != nil {
-		return fmt.Errorf("failed to start worker: %w", err)
+func (c *Client) Start() (<-chan error, error) {
+	errChan, err := c.worker.Start()
+	if err != nil {
+		return nil, fmt.Errorf("failed to start worker: %w", err)
 	}
 
 	// Start message processing
+	// Note: the message streams are created before the process runs, so this does not need to wait for successful startup
+	// to run or close properly.
 	go c.processMessages()
 
-	return nil
+	return errChan, nil
 }
 
 // Stop stops the client and the underlying Python worker
@@ -121,7 +124,7 @@ func (c *Client) sendRequestWithTimeoutAndHandler(method string, params any, tim
 	c.reqContextsMutex.Unlock()
 
 	// Create response channel
-	respChan := make(chan *Message, 1)
+	respChan := make(chan *Message, 10)
 	c.reqMutex.Lock()
 	c.pendingReqs[id] = respChan
 	c.reqMutex.Unlock()
@@ -136,14 +139,13 @@ func (c *Client) sendRequestWithTimeoutAndHandler(method string, params any, tim
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 
-	go c.handleRequestResponse(id, respChan)
+	// fmt.Println("Request sent:", id, "Method:", method, "Params:", params)
+	go c.handleRequestResponse(id)
 	return id, nil
 }
 
 // handleRequestResponse processes the response from Python for the given request ID
-func (c *Client) handleRequestResponse(requestID string, respChan <-chan *Message) {
-	defer c.cleanupRequest(requestID)
-
+func (c *Client) handleRequestResponse(requestID string) {
 	c.reqContextsMutex.RLock()
 	reqCtx, exists := c.reqContexts[requestID]
 	c.reqContextsMutex.RUnlock()
@@ -152,8 +154,16 @@ func (c *Client) handleRequestResponse(requestID string, respChan <-chan *Messag
 		return
 	}
 
-	ctx := c.ctx // Default to the client's context
+	// Create and register the response channel
+	respChan := make(chan *Message, 10)
+	c.reqMutex.Lock()
+	c.pendingReqs[requestID] = respChan
+	c.reqMutex.Unlock()
 
+	// Ensure cleanup happens
+	defer c.cleanupRequest(requestID)
+
+	ctx := c.ctx // Default to the client's context
 	// Only apply timeout if it's greater than 0
 	if reqCtx.Timeout > 0 {
 		var cancel context.CancelFunc
@@ -161,42 +171,42 @@ func (c *Client) handleRequestResponse(requestID string, respChan <-chan *Messag
 		defer cancel()
 	}
 
-	select {
-	case response := <-respChan:
-		if response == nil { // channel has been closed
-			if reqCtx.ResponseHandler != nil {
-				reqCtx.ResponseHandler(nil, fmt.Errorf("request cancelled"))
+	for {
+		select {
+		case response := <-respChan:
+			if response == nil { // channel has been closed
+				if reqCtx.ResponseHandler != nil {
+					reqCtx.ResponseHandler(nil, fmt.Errorf("request cancelled"))
+				}
+				return
 			}
+
+			// Process response based on type
+			if response.Type == MessageTypeError {
+				if reqCtx.ResponseHandler != nil {
+					reqCtx.ResponseHandler(response, fmt.Errorf("python error: %v", response.Error))
+				}
+			} else {
+				// Call user's response handler for processing
+				if reqCtx.ResponseHandler != nil {
+					reqCtx.ResponseHandler(response, nil)
+				}
+
+				if response.Type == MessageTypeResponse {
+					defer c.cleanupRequest(requestID)
+					return // Final response received; exit
+				}
+			}
+
+		case <-ctx.Done():
+			if reqCtx.Timeout > 0 && ctx.Err() == context.DeadlineExceeded {
+				err := fmt.Errorf("request timeout after %v", reqCtx.Timeout)
+				if reqCtx.ResponseHandler != nil {
+					reqCtx.ResponseHandler(nil, err)
+				}
+			}
+			// For other cancellations (like client shutdown), just return quietly
 			return
-		}
-
-		// Process response based on type
-		if response.Type == MessageTypeError {
-			if reqCtx.ResponseHandler != nil {
-				reqCtx.ResponseHandler(response, fmt.Errorf("python error: %v", response.Error))
-			}
-		} else {
-			// Call user's response handler for processing
-			if reqCtx.ResponseHandler != nil {
-				reqCtx.ResponseHandler(response, nil)
-			}
-		}
-
-	case <-ctx.Done():
-		// Only handle if timeout > 0
-		if reqCtx.Timeout <= 0 {
-			return // No timeout, just return
-		}
-
-		var err error
-		if ctx.Err() == context.DeadlineExceeded {
-			err = fmt.Errorf("request timeout after %v", reqCtx.Timeout)
-		} else {
-			err = fmt.Errorf("request cancelled: %w", ctx.Err())
-		}
-
-		if reqCtx.ResponseHandler != nil {
-			reqCtx.ResponseHandler(nil, err)
 		}
 	}
 }
@@ -243,8 +253,9 @@ func (c *Client) processMessages() {
 			c.handleMessage(msg)
 		case err := <-errChan:
 			if err != nil {
-				fmt.Println(err)
-				continue
+				// Note: ReadChannel stops receiving messages once an error occurs; we may want for this to be more robust
+				fmt.Printf("Error in ReadMessage() from stdio stream; closing read channel: %v\n", err)
+				return
 			}
 			return
 		case <-c.ctx.Done():
@@ -256,23 +267,6 @@ func (c *Client) processMessages() {
 // handleMessage handles an incoming message
 func (c *Client) handleMessage(msg *Message) {
 	switch msg.Type {
-	case MessageTypeResponse, MessageTypeError:
-		// Handle response/error for pending request
-		if msg.ID != "" {
-			c.reqMutex.RLock()
-			respChan, exists := c.pendingReqs[msg.ID]
-			c.reqMutex.RUnlock()
-
-			// TODO: Handle case where response channel is closed or full
-			// If the channel is full, we skip sending the message to avoid blocking (this is not ideal...)
-			if exists {
-				select {
-				case respChan <- msg:
-				default:
-					// Channel might be full or closed
-				}
-			}
-		}
 	case MessageTypeEvent:
 		// Handle event
 		if msg.Method != "" {
@@ -283,6 +277,30 @@ func (c *Client) handleMessage(msg *Message) {
 			if exists {
 				go handler(msg) // Run handler in goroutine to avoid blocking
 			}
+		}
+	default:
+		{
+			// MessageTypeResponse, MessageTypeError, MessageTypeProgress:
+			if msg.ID != "" {
+				c.reqMutex.RLock()
+				respChan, exists := c.pendingReqs[msg.ID]
+				c.reqMutex.RUnlock()
+
+				if exists && respChan != nil {
+					respChan <- msg
+				}
+			}
+
+			// TODO: Handle case where response channel is closed or full
+			// If the channel is full, we skip sending the message to avoid blocking (this is not ideal...)
+			// 	if exists {
+			// 		select {
+			// 		case respChan <- msg:
+			// 		default:
+			// 			// Channel might be full or closed
+			// 		}
+			// 	}
+			// }
 		}
 	}
 }

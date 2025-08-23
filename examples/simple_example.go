@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 	"os"
@@ -27,26 +28,46 @@ func main() {
 	// Create and start the client
 	client := jsonlipc.NewClient(config)
 
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	readyChan := make(chan struct{})
+
 	fmt.Println("Starting Python worker...")
-	if err := client.Start(); err != nil {
-		log.Fatalf("Failed to start client: %v", err)
-	}
-	defer client.Stop()
-
-	var wgStart sync.WaitGroup
-	wgStart.Add(1)
-
-	// Register an event handler
+	// Set up event handlers
 	client.OnEvent("log", func(msg *jsonlipc.Message) {
+		// TODO: this needs to be passed to the UI
 		fmt.Printf("Python log: %v\n", msg.Params)
 	})
 
+	// Ready event is not being propagated, so a context timeout is occurring
 	client.OnEvent("ready", func(msg *jsonlipc.Message) {
-		fmt.Println("Python worker is ready!")
-		wgStart.Done() // Signal that the worker is ready
+		fmt.Println("Ready event received")
+		close(readyChan)
 	})
 
-	wgStart.Wait() // Wait for Python to signal that it's ready
+	errChan, err := client.Start()
+	defer client.Stop()
+
+	if err != nil {
+		fmt.Println("failed to start Python worker: %w", err)
+		return
+	}
+
+	// Block until the engine is ready, startup error occurs, or context is cancelled
+	select {
+	case err := <-errChan:
+		fmt.Println("worker process exited unexpectedly on startup: %w", err)
+		return
+	case <-readyChan:
+		fmt.Println("Ready event received")
+	case <-ctx.Done():
+		fmt.Println("Context timedout before engine was ready")
+		// TODO: handle this more gracefully with messages back to the UI
+		client.Stop()
+		fmt.Println(ctx.Err())
+		return
+	}
 
 	// Make some RPC calls
 	fmt.Println("\nMaking RPC calls...")
@@ -54,7 +75,7 @@ func main() {
 
 	// Call ping
 	wg.Add(1)
-	_, err := client.SendRequestWithTimeoutAndHandler("ping", nil, 2, func(msg *jsonlipc.Message, err error) {
+	_, err = client.SendRequestWithTimeoutAndHandler("ping", nil, 2, func(msg *jsonlipc.Message, err error) {
 		if err != nil {
 			log.Fatalf("Ping failed: %v", err)
 		}
@@ -65,7 +86,7 @@ func main() {
 
 		s, err := jsonlipc.GetTypedResult[string](msg)
 		if err != nil {
-			log.Fatalf("Ping response is not a string: %v", msg.Result)
+			log.Fatalf("Ping response is not a string: %v", msg.Data)
 		}
 
 		if s != "pong" {
@@ -92,9 +113,9 @@ func main() {
 			log.Fatalf("Add response is nil")
 			return
 		}
-		s, ok := msg.Result.(float64) // all JSON numbers are float64 when unmarshalled in Go
+		s, ok := msg.Data.(float64) // all JSON numbers are float64 when unmarshalled in Go
 		if !ok {
-			log.Fatalf("Add response is not a float64, got %[1]v (%[1]T) instead", msg.Result)
+			log.Fatalf("Add response is not a float64, got %[1]v (%[1]T) instead", msg.Data)
 		}
 		if s != float64(8) {
 			log.Fatalf("Unexpected add response: %v", s)
@@ -119,7 +140,7 @@ func main() {
 			log.Fatalf("Shutdown response is nil")
 			return
 		}
-		fmt.Println("Shutdown successful:", msg.Result)
+		fmt.Println("Shutdown successful:", msg.Data)
 		wg.Done()
 	})
 

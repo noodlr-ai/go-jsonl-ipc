@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"runtime"
 	"sync"
 	"time"
 )
@@ -23,13 +24,15 @@ type WorkerConfig struct {
 
 // Worker represents a managed Python process for IPC communication
 type Worker struct {
-	config  WorkerConfig
-	cmd     *exec.Cmd
-	stream  *Stream
-	ctx     context.Context
-	cancel  context.CancelFunc
-	mutex   sync.RWMutex
-	running bool
+	config     WorkerConfig
+	cmd        *exec.Cmd
+	stream     *Stream
+	ctx        context.Context
+	cancel     context.CancelFunc
+	mutex      sync.RWMutex
+	running    bool
+	forcedStop bool
+	done       chan error // Used with cmd.Wait() to signal that the process has exited
 }
 
 // NewWorker creates a new worker with the given configuration
@@ -52,12 +55,12 @@ func NewWorker(config WorkerConfig) *Worker {
 }
 
 // Start starts the Python worker process
-func (w *Worker) Start() error {
+func (w *Worker) Start() (<-chan error, error) {
 	w.mutex.Lock()
 	defer w.mutex.Unlock()
 
 	if w.running {
-		return fmt.Errorf("worker is already running")
+		return nil, fmt.Errorf("worker is already running")
 	}
 
 	// Build command arguments
@@ -80,74 +83,106 @@ func (w *Worker) Start() error {
 	// Set up pipes for stdin, stdout, stderr
 	stdin, err := w.cmd.StdinPipe()
 	if err != nil {
-		return fmt.Errorf("failed to create stdin pipe: %w", err)
+		return nil, fmt.Errorf("failed to create stdin pipe: %w", err)
 	}
 
 	stdout, err := w.cmd.StdoutPipe()
 	if err != nil {
-		return fmt.Errorf("failed to create stdout pipe: %w", err)
+		return nil, fmt.Errorf("failed to create stdout pipe: %w", err)
 	}
 
 	stderr, err := w.cmd.StderrPipe()
 	if err != nil {
-		return fmt.Errorf("failed to create stderr pipe: %w", err)
+		return nil, fmt.Errorf("failed to create stderr pipe: %w", err)
 	}
 
 	// Create stream for communication
 	w.stream = NewStream(stdout, stdin)
 
 	// Start the process
+	// Note: this only throws errors if the process fails to launch, so if python.exe launches then err is nil, even if the script python.exe attempts
+	// to launch doesn't exist or contains errors
 	if err := w.cmd.Start(); err != nil {
-		return fmt.Errorf("failed to start Python process: %w", err)
+		return nil, fmt.Errorf("failed to start Python process: %w", err)
 	}
 
+	w.done = make(chan error, 1)
 	w.running = true
+	w.forcedStop = false
 
 	// Start goroutine to handle stderr
-	go w.handleStderr(stderr)
+	// Note: this is important for capturing process errors (e.g., when python.exe fails to launch the script because it doesn't exist)
+	errChan := make(chan error, 1)
+	go w.handleStderr(stderr, errChan)
 
-	return nil
+	// Note: we are not currently listening for the context to be cancelled; not sure if it is needed
+	go func(done chan error) {
+		defer close(done)
+		err := w.cmd.Wait()
+		// It was not a forced stop; it has exited unexpectedly
+		if !w.forcedStop && w.IsRunning() {
+			w.sendErrorWithoutWaiting(fmt.Errorf("worker process exited unexpectedly: %w", err), errChan)
+			w.cleanup() // Clean up state
+			return
+		}
+
+		// It has been forced to stop and we are currently waiting for the Wait() signal as part of the Stop() shutdown process
+		if w.forcedStop && w.IsRunning() {
+			w.done <- err
+		}
+	}(w.done)
+
+	return errChan, nil
+}
+
+// Cleans-up state when stopped
+func (w *Worker) cleanup() {
+	w.mutex.Lock()
+	defer w.mutex.Unlock()
+	w.stream = nil
+	w.cmd = nil
+	w.running = false
 }
 
 // Stop stops the Python worker process
 func (w *Worker) Stop() error {
-	w.mutex.Lock()
-	defer w.mutex.Unlock()
 
+	w.mutex.Lock()
+	w.forcedStop = true
 	if !w.running {
+		w.mutex.Unlock()
 		return nil
 	}
 
 	// Cancel context to signal shutdown
 	w.cancel()
+	w.mutex.Unlock()
 
 	// Try graceful shutdown first
 	if w.cmd != nil && w.cmd.Process != nil {
-		if err := w.cmd.Process.Signal(os.Interrupt); err != nil {
-			// If graceful shutdown fails, force kill
-			w.cmd.Process.Kill()
+
+		// Windows will not accept os.Interrupt signal for graceful shutdown, send shutdown event instead
+		if runtime.GOOS == "windows" {
+			w.Stream().WriteMessage(NewEvent("shutdown", nil))
+		} else {
+			// On Unix-like systems, use SIGINT
+			if err := w.cmd.Process.Signal(os.Interrupt); err != nil {
+				// If graceful shutdown fails on Unix, force kill
+				w.cmd.Process.Kill() // Note: this will cause Wait() to unblock as expected
+			}
 		}
 
-		// Wait for process to finish with timeout
-		done := make(chan error, 1)
-		go func() {
-			done <- w.cmd.Wait()
-		}()
-
 		select {
-		case <-done:
-			// Process finished
+		case <-w.done:
+			return nil // Process finished gracefully
 		case <-time.After(w.config.Timeout):
 			// Timeout reached, force kill
 			w.cmd.Process.Kill()
-			<-done // Wait for process to be killed
+			<-w.done // Wait for process to be killed
 		}
 	}
 
-	w.running = false
-	w.cmd = nil
-	w.stream = nil
-
+	w.cleanup() // Clean up state
 	return nil
 }
 
@@ -166,12 +201,32 @@ func (w *Worker) Stream() *Stream {
 }
 
 // handleStderr reads from stderr and logs errors
-func (w *Worker) handleStderr(stderr io.Reader) {
+func (w *Worker) handleStderr(stderr io.Reader, errChan chan<- error) {
 	scanner := bufio.NewScanner(stderr)
+
 	for scanner.Scan() {
-		// For now, we'll just ignore stderr output
-		// In a more advanced implementation, you might want to log this
-		// or provide a callback mechanism
-		_ = scanner.Text()
+		if err := scanner.Err(); err != nil {
+			w.Stop() // Stop the worker on stderr error
+			w.sendErrorWithoutWaiting(err, errChan)
+			return
+		}
+
+		// TODO: an error can span multiple lines; determine the best way to handle this
+		errText := scanner.Text()
+		if len(errText) == 0 {
+			continue
+		}
+
+		w.Stop() // Stop the worker on stderr error
+		w.sendErrorWithoutWaiting(fmt.Errorf("error received from worker on stderr: %v", errText), errChan)
+		return
+	}
+}
+
+func (w *Worker) sendErrorWithoutWaiting(err error, errChan chan<- error) {
+	select {
+	case errChan <- err:
+	default:
+		// Channel full, error dropped but shutdown still happens
 	}
 }

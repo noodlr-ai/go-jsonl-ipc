@@ -3,24 +3,28 @@
 Example usage of the JSONL IPC Worker library.
 Shows different ways to use the worker in external modules.
 """
-# Installed via `pip install git+https://github.com/noodlr-ai/py-jsonl-ipc.git@v0.0.3`
+# Installed via `pip install --upgrade git+https://github.com/noodlr-ai/py-jsonl-ipc.git@v0.0.3`
 from jsonlipc import JSONLWorker
 
 # Method 1: Using function-based handlers
+
+
 def handle_math_add(request_id, params):
     """Custom add handler with validation."""
     try:
         a = params.get("a")
         b = params.get("b")
-        
+
         if a is None or b is None:
-            worker.send_error(request_id, -32602, "Missing required parameters 'a' and 'b'")
+            worker.send_error(request_id, -32602,
+                              "Missing required parameters 'a' and 'b'")
             return
-            
+
         if not isinstance(a, (int, float)) or not isinstance(b, (int, float)):
-            worker.send_error(request_id, -32602, "Parameters 'a' and 'b' must be numbers")
+            worker.send_error(request_id, -32602,
+                              "Parameters 'a' and 'b' must be numbers")
             return
-            
+
         result = a + b
         worker.send_response(request_id, result)
     except Exception as e:
@@ -47,16 +51,17 @@ def handle_log_message(request_id, params):
     """Log a message and send confirmation."""
     message = params.get("message", "")
     level = params.get("level", "info")
-    
+
     # Send event to parent process
     worker.send_event("log_received", {
         "level": level,
         "message": message,
         "timestamp": __import__("time").time()
     })
-    
+
     # Send response
     worker.send_response(request_id, {"status": "logged"})
+
 
 # Create worker with initial handlers
 worker = JSONLWorker({
@@ -67,22 +72,30 @@ worker = JSONLWorker({
 })
 
 # Method 2: Registering handlers after creation
+
+
 def handle_divide(request_id, params):
     """Division handler with zero-division protection."""
     try:
         a = params.get("a", 0)
         b = params.get("b", 1)
-        
+
         if b == 0:
             worker.send_error(request_id, -32001, "Division by zero")
             return
-            
+
         result = a / b
         worker.send_response(request_id, result)
     except Exception as e:
         worker.send_error(request_id, -1, str(e))
 
+
 worker.register_handler("divide", handle_divide)
 
-if __name__ == "__main__":    
+if __name__ == "__main__":
     worker.run()
+
+
+# LEFT-OFF: engine does not have any tests for the actual handlers, add these!
+# LEFT-OFF: updating my go-jsonl-ipc with the latest changes
+# LEFT-OFF: installing py-jsonl-ipc in the global 3.13.5 pyenv

@@ -17,33 +17,35 @@ const (
 	MessageTypeError MessageType = "error"
 	// MessageTypeEvent represents an event message
 	MessageTypeEvent MessageType = "event"
+	// MessageTypeProgress represents a progress message
+	MessageTypeProgress MessageType = "progress"
 )
 
-// Message represents a JSON Lines message for IPC communication
+// Message represents a JSON Lines message for IPC communication (a union of various messages for simplicity)
 // Note: The Message struct is designed to be compatible with JSON Lines format because of the omitempty directives
 type Message struct {
 	ID     string      `json:"id,omitempty"`     // Unique identifier for request/response correlation
 	Type   MessageType `json:"type"`             // Type of message
 	Method string      `json:"method,omitempty"` // Method name for requests
 	Params any         `json:"params,omitempty"` // Parameters for the method
-	Result any         `json:"result,omitempty"` // Result data for responses
-	Error  *Error      `json:"error,omitempty"`  // Error information
+	Data   any         `json:"data,omitempty"`   // Result data for responses
+	Error  *IPCError   `json:"error,omitempty"`  // Error information
 }
 
 // GetTypeResult is a standalone generic function because Golang does not support generic methods
 func GetTypedResult[T any](m *Message) (T, error) {
 	var zero T
-	if m.Result == nil {
+	if m.Data == nil {
 		return zero, fmt.Errorf("no result data")
 	}
 
 	// Try direct type assertion first (fastest path for simple types)
-	if result, ok := m.Result.(T); ok {
+	if result, ok := m.Data.(T); ok {
 		return result, nil
 	}
 
 	// Fall back to marshal/unmarshal for complex conversions
-	data, err := json.Marshal(m.Result)
+	data, err := json.Marshal(m.Data)
 	if err != nil {
 		return zero, fmt.Errorf("failed to marshal result: %w", err)
 	}
@@ -56,8 +58,8 @@ func GetTypedResult[T any](m *Message) (T, error) {
 	return result, nil
 }
 
-// Error represents an error in the IPC communication
-type Error struct {
+// IPCError represents an error in the IPCError communication
+type IPCError struct {
 	Code    int    `json:"code"`           // Error code
 	Message string `json:"message"`        // Error message
 	Data    any    `json:"data,omitempty"` // Additional error data
@@ -76,18 +78,18 @@ func NewRequest(id, method string, params any) *Message {
 // NewResponse creates a new response message
 func NewResponse(id string, result any) *Message {
 	return &Message{
-		ID:     id,
-		Type:   MessageTypeResponse,
-		Result: result,
+		ID:   id,
+		Type: MessageTypeResponse,
+		Data: result,
 	}
 }
 
-// NewError creates a new error message
-func NewError(id string, code int, message string, data any) *Message {
+// NewIPCError creates a new error message
+func NewIPCError(id string, code int, message string, data any) *Message {
 	return &Message{
 		ID:   id,
 		Type: MessageTypeError,
-		Error: &Error{
+		Error: &IPCError{
 			Code:    code,
 			Message: message,
 			Data:    data,

@@ -17,35 +17,40 @@ type Stream struct {
 
 // NewStream creates a new stream for JSON Lines communication
 func NewStream(reader io.Reader, writer io.Writer) *Stream {
+	sc := bufio.NewScanner(reader)
+	sc.Buffer(make([]byte, 0, 64*1024), 5*1024*1024) // allow big JSON lines (5MB)
 	return &Stream{
-		scanner: bufio.NewScanner(reader),
+		scanner: sc,
 		writer:  writer,
 	}
 }
 
 // ReadMessage reads a single JSON Lines message from the stream
 func (s *Stream) ReadMessage() (*Message, error) {
-	if !s.scanner.Scan() {
-		if err := s.scanner.Err(); err != nil {
-			return nil, fmt.Errorf("failed to scan line: %w", err)
+	// Note: we use a for-loop and continue instead of calling ReadMessage() recursively when we encounter an empty line
+	for {
+		if !s.scanner.Scan() {
+			if err := s.scanner.Err(); err != nil {
+				return nil, fmt.Errorf("failed to scan line: %w", err)
+			}
+			// EOF reached
+			return nil, io.EOF
 		}
-		// EOF reached
-		return nil, io.EOF
+
+		line := s.scanner.Bytes()
+
+		// Skip empty lines
+		if len(line) == 0 {
+			continue
+		}
+
+		var msg Message
+		if err := json.Unmarshal(line, &msg); err != nil {
+			return nil, fmt.Errorf("(warning) improperly formed message: %s", string(line))
+		}
+
+		return &msg, nil
 	}
-
-	line := s.scanner.Bytes()
-
-	// Skip empty lines
-	if len(line) == 0 {
-		return s.ReadMessage()
-	}
-
-	var msg Message
-	if err := json.Unmarshal(line, &msg); err != nil {
-		return nil, fmt.Errorf("(warning) improperly formed message: %s", string(line))
-	}
-
-	return &msg, nil
 }
 
 // WriteMessage writes a JSON Lines message to the stream
@@ -80,8 +85,8 @@ func (s *Stream) WriteMessage(msg *Message) error {
 
 // ReadChannel returns a channel that receives messages from the stream
 func (s *Stream) ReadChannel() (<-chan *Message, <-chan error) {
-	msgChan := make(chan *Message)
-	errChan := make(chan error, 1)
+	msgChan := make(chan *Message, 10)
+	errChan := make(chan error, 10)
 
 	go func() {
 		defer close(msgChan)
@@ -89,13 +94,21 @@ func (s *Stream) ReadChannel() (<-chan *Message, <-chan error) {
 
 		for {
 			msg, err := s.ReadMessage()
-			if err != nil {
-				if err != io.EOF {
-					errChan <- err
-				}
-				continue // Note: we may need to handle EOF differently if the Python process unexpectedly terminates
+			if err == nil {
+				msgChan <- msg
+				continue
 			}
-			msgChan <- msg
+			if err == io.EOF {
+				return // child closed stdout; we'er done
+			}
+			// send error if possible; otherwise drop to avoid blocking
+			select {
+			case errChan <- err:
+				// Note: it is possible for ReadMessage() to return a "file already closed" when the engine is shutdown
+			default:
+			}
+			// TODO: may want this to be a continue instead
+			return // stop draining on persistent error
 		}
 	}()
 
