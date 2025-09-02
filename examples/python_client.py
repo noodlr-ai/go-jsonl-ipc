@@ -94,8 +94,3 @@ worker.register_handler("divide", handle_divide)
 
 if __name__ == "__main__":
     worker.run()
-
-
-# LEFT-OFF: engine does not have any tests for the actual handlers, add these!
-# LEFT-OFF: updating my go-jsonl-ipc with the latest changes
-# LEFT-OFF: installing py-jsonl-ipc in the global 3.13.5 pyenv

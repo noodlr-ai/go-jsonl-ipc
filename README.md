@@ -18,9 +18,90 @@ go mod init your-project
 go get noodlr-ai/go-jsonl-ipc
 ```
 
+### In
+
+Message (union of message and event types)
+
+```
+{
+    id: string;
+    type: string;
+    method: string;
+    params: any;
+    data: any;
+    error: *MessageError{
+        code: int;
+        message: string;
+        data: any;
+    }
+}
+```
+
+Response Message
+
+```
+{
+    id: string;
+    type: "response";
+    data: any;
+}
+```
+
+Progress Message
+
+```
+{
+    id: string;
+    type: "progress";
+    data: any;
+}
+```
+
+Error Message
+
+```
+{
+    id: string;
+    type: "error";
+    error: *MessageError{
+        code: int;
+        message: string;
+        data: any;
+    }
+}
+```
+
+### Out
+
+Request Message
+
+```
+{
+    id: string;
+    method: string;
+    params: any;
+}
+
+
+Event Message
+
+```
+
+{
+type: "event";
+method: string;
+params: any;
+}
+
+```
+
 # Tagging
 
 ```
+
 git tag v0.0.x
 git push origin v0.0.3
+
+```
+
 ```

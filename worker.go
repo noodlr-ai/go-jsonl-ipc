@@ -163,7 +163,10 @@ func (w *Worker) Stop() error {
 
 		// Windows will not accept os.Interrupt signal for graceful shutdown, send shutdown event instead
 		if runtime.GOOS == "windows" {
-			w.Stream().WriteMessage(NewEvent("shutdown", nil))
+			req, err := NewRequest("ctrl_01FZ", "shutdown", nil)
+			if err == nil {
+				w.Stream().WriteMessage(req)
+			}
 		} else {
 			// On Unix-like systems, use SIGINT
 			if err := w.cmd.Process.Signal(os.Interrupt); err != nil {

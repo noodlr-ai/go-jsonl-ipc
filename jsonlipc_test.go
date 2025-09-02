@@ -7,7 +7,12 @@ import (
 
 func TestMessage(t *testing.T) {
 	// Test request message
-	req := NewRequest("test1", "ping", nil)
+	req, err := NewRequest("test1", "ping", nil)
+
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
+
 	if req.ID != "test1" {
 		t.Errorf("Expected ID 'test1', got '%s'", req.ID)
 	}
@@ -19,36 +24,49 @@ func TestMessage(t *testing.T) {
 	}
 
 	// Test response message
-	resp := NewResponse("test1", "pong")
+	resp, err := NewResponse("test1", "pong")
+	if err != nil {
+		t.Fatalf("Failed to create response: %v", err)
+	}
 	if resp.ID != "test1" {
 		t.Errorf("Expected ID 'test1', got '%s'", resp.ID)
 	}
 	if resp.Type != MessageTypeResponse {
 		t.Errorf("Expected type '%s', got '%s'", MessageTypeResponse, resp.Type)
 	}
-	if resp.Data != "pong" {
-		t.Errorf("Expected result 'pong', got '%v'", resp.Data)
+
+	var result string
+	err = resp.UnmarshalData(&result)
+	if err != nil {
+		t.Errorf("Failed to unmarshal data: %v", err)
+	}
+	if result != "pong" {
+		t.Errorf("Expected result 'pong', got '%v'", result)
 	}
 
 	// Test error message
-	errMsg := NewIPCError("test1", -1, "test error", nil)
+	errMsg := NewTransportError("test1", "test error", ErrorCodeInternalError, nil)
+
 	if errMsg.ID != "test1" {
 		t.Errorf("Expected ID 'test1', got '%s'", errMsg.ID)
 	}
-	if errMsg.Type != MessageTypeError {
-		t.Errorf("Expected type '%s', got '%s'", MessageTypeError, errMsg.Type)
+	if !errMsg.IsError() {
+		t.Errorf("Expected IsError() to be true")
 	}
-	if errMsg.Error.Code != -1 {
-		t.Errorf("Expected error code -1, got %d", errMsg.Error.Code)
+	if errMsg.Error.Code != ErrorCodeInternalError {
+		t.Errorf("Expected error code %s, got %s", ErrorCodeInternalError, errMsg.Error.Code)
 	}
 	if errMsg.Error.Message != "test error" {
 		t.Errorf("Expected error message 'test error', got '%s'", errMsg.Error.Message)
 	}
 
 	// Test event message
-	event := NewEvent("notify", map[string]string{"msg": "hello"})
-	if event.Type != MessageTypeEvent {
-		t.Errorf("Expected type '%s', got '%s'", MessageTypeEvent, event.Type)
+	event, err := NewNotification("sess_1234", NotificationNotify, map[string]string{"msg": "hello"})
+	if err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
+	if event.Type != MessageTypeNotification {
+		t.Errorf("Expected type '%s', got '%s'", MessageTypeNotification, event.Type)
 	}
 	if event.Method != "notify" {
 		t.Errorf("Expected method 'notify', got '%s'", event.Method)
@@ -57,7 +75,10 @@ func TestMessage(t *testing.T) {
 
 func TestMessageJSON(t *testing.T) {
 	// Test JSON marshaling
-	req := NewRequest("test1", "ping", map[string]int{"num": 42})
+	req, err := NewRequest("test1", "ping", map[string]int{"num": 42})
+	if err != nil {
+		t.Fatalf("Failed to create request: %v", err)
+	}
 
 	data, err := req.ToJSON()
 	if err != nil {
@@ -147,7 +168,10 @@ func TestRequestContext(t *testing.T) {
 	}
 
 	// Test response handler
-	testMsg := NewResponse("test_req_1", "test result")
+	testMsg, err := NewResponse("test_req_1", "test result")
+	if err != nil {
+		t.Fatalf("Failed to create response: %v", err)
+	}
 	reqCtx.ResponseHandler(testMsg, nil)
 
 	if !responseReceived {
@@ -176,13 +200,16 @@ func TestClientEventHandling(t *testing.T) {
 	var receivedEvent *Message
 
 	// Register event handler
-	client.OnEvent("test_event", func(msg *Message) {
+	client.OnNotification("test_event", func(msg *Message) {
 		eventReceived = true
 		receivedEvent = msg
 	})
 
 	// Simulate receiving an event message
-	testEvent := NewEvent("test_event", map[string]string{"data": "test"})
+	testEvent, err := NewNotification("sess_1234", "test_event", map[string]string{"data": "test"})
+	if err != nil {
+		t.Fatalf("Failed to create notification: %v", err)
+	}
 	client.handleMessage(testEvent)
 
 	// Give some time for the handler to be called
@@ -287,7 +314,10 @@ func TestMessageResponseHandling(t *testing.T) {
 	client.reqMutex.Unlock()
 
 	// Create a response message
-	response := NewResponse("test_response", "test result")
+	response, err := NewResponse("test_response", "test result")
+	if err != nil {
+		t.Fatalf("Failed to create response: %v", err)
+	}
 
 	// Handle the message
 	client.handleMessage(response)
@@ -298,10 +328,65 @@ func TestMessageResponseHandling(t *testing.T) {
 		if receivedMsg.ID != "test_response" {
 			t.Errorf("Expected response ID 'test_response', got '%s'", receivedMsg.ID)
 		}
-		if receivedMsg.Data != "test result" {
-			t.Errorf("Expected result 'test result', got '%v'", receivedMsg.Data)
+		var data string
+		if err := receivedMsg.UnmarshalData(&data); err != nil {
+			t.Errorf("Failed to unmarshal response data: %v", err)
+		}
+		if data != "test result" {
+			t.Errorf("Expected result 'test result', got '%v'", data)
 		}
 	case <-time.After(100 * time.Millisecond):
 		t.Error("Response was not received on channel")
+	}
+}
+
+// Test transport warning functionality
+func TestTransportWarning(t *testing.T) {
+	// Test creating a response with warning
+	resp, err := NewResponse("test1", "result with warning")
+	if err != nil {
+		t.Fatalf("Failed to create response: %v", err)
+	}
+
+	// Add a transport warning
+	resp.Warnings = []TransportWarning{
+		{
+			Code:    "DEPRECATED_METHOD",
+			Level:   WarnWarn,
+			Message: "This method is deprecated and will be removed in future versions",
+			Details: map[string]interface{}{"alternative": "use_new_method"},
+		},
+	}
+
+	if len(resp.Warnings) == 0 {
+		t.Error("Expected Warnings to be set")
+	}
+
+	if resp.Warnings[0].Code != "DEPRECATED_METHOD" {
+		t.Errorf("Expected warning code 'DEPRECATED_METHOD', got '%s'", resp.Warnings[0].Code)
+	}
+
+	if resp.Warnings[0].Message != "This method is deprecated and will be removed in future versions" {
+		t.Errorf("Expected warning message 'This method is deprecated and will be removed in future versions', got '%s'", resp.Warnings[0].Message)
+	}
+
+	// Test JSON marshaling with warning
+	data, err := resp.ToJSON()
+	if err != nil {
+		t.Fatalf("Failed to marshal message with warning: %v", err)
+	}
+
+	// Test JSON unmarshaling with warning
+	msg, err := FromJSON(data)
+	if err != nil {
+		t.Fatalf("Failed to unmarshal message with warning: %v", err)
+	}
+
+	if len(msg.Warnings) == 0 {
+		t.Error("Expected Warnings to be preserved after JSON round-trip")
+	}
+
+	if msg.Warnings[0].Code != "DEPRECATED_METHOD" {
+		t.Errorf("Expected warning code 'DEPRECATED_METHOD' after unmarshaling, got '%s'", msg.Warnings[0].Code)
 	}
 }

@@ -29,6 +29,7 @@ type Client struct {
 	cancel           context.CancelFunc
 	reqContexts      map[string]*RequestContext // Track request contexts for cancellation
 	reqContextsMutex sync.RWMutex               // Mutex for request context management
+	sessionID        string                     // Session ID for correlating logs/traces
 }
 
 // NewClient creates a new client with the given worker configuration
@@ -42,6 +43,7 @@ func NewClient(config WorkerConfig) *Client {
 		reqContexts:   make(map[string]*RequestContext),
 		ctx:           ctx,
 		cancel:        cancel,
+		sessionID:     fmt.Sprintf("sess_%d", time.Now().UnixNano()),
 	}
 }
 
@@ -130,7 +132,12 @@ func (c *Client) sendRequestWithTimeoutAndHandler(method string, params any, tim
 	c.reqMutex.Unlock()
 
 	// Send request
-	request := NewRequest(id, method, params)
+	request, err := NewRequest(id, method, params)
+	if err != nil {
+		// Clean up on error
+		c.cleanupRequest(id)
+		return "", fmt.Errorf("failed to create request: %w", err)
+	}
 
 	// TODO: this write is blocking, we may want to handle this asynchronously
 	if err := c.worker.Stream().WriteMessage(request); err != nil {
@@ -182,7 +189,7 @@ func (c *Client) handleRequestResponse(requestID string) {
 			}
 
 			// Process response based on type
-			if response.Type == MessageTypeError {
+			if response.IsError() {
 				if reqCtx.ResponseHandler != nil {
 					reqCtx.ResponseHandler(response, fmt.Errorf("python error: %v", response.Error))
 				}
@@ -211,19 +218,21 @@ func (c *Client) handleRequestResponse(requestID string) {
 	}
 }
 
-// SendEvent sends an event message to the Python process (fire-and-forget)
-func (c *Client) SendEvent(method string, params any) error {
+// SendNotification sends a notification message to the Python process (fire-and-forget)
+func (c *Client) SendNotification(method NotificationMethod, params any) error {
 	if !c.worker.IsRunning() {
 		return fmt.Errorf("worker is not running")
 	}
 
-	event := NewEvent(method, params)
-	return c.worker.Stream().WriteMessage(event)
+	notification, err := NewNotification(c.sessionID, method, params)
+	if err != nil {
+		return err
+	}
+	return c.worker.Stream().WriteMessage(notification)
 }
 
 // OnEvent registers an event handler for a specific method
-// TODO: we may want this to run in a goroutine to avoid blocking the main thread
-func (c *Client) OnEvent(method string, handler func(*Message)) {
+func (c *Client) OnNotification(method string, handler func(*Message)) {
 	c.handlerMutex.Lock()
 	defer c.handlerMutex.Unlock()
 	c.eventHandlers[method] = handler
@@ -266,8 +275,8 @@ func (c *Client) processMessages() {
 
 // handleMessage handles an incoming message
 func (c *Client) handleMessage(msg *Message) {
-	switch msg.Type {
-	case MessageTypeEvent:
+
+	if msg.Type == MessageTypeNotification {
 		// Handle event
 		if msg.Method != "" {
 			c.handlerMutex.RLock()
@@ -278,29 +287,16 @@ func (c *Client) handleMessage(msg *Message) {
 				go handler(msg) // Run handler in goroutine to avoid blocking
 			}
 		}
-	default:
-		{
-			// MessageTypeResponse, MessageTypeError, MessageTypeProgress:
-			if msg.ID != "" {
-				c.reqMutex.RLock()
-				respChan, exists := c.pendingReqs[msg.ID]
-				c.reqMutex.RUnlock()
+	} else {
+		// MessageTypeResponse
+		if msg.ID != "" {
+			c.reqMutex.RLock()
+			respChan, exists := c.pendingReqs[msg.ID]
+			c.reqMutex.RUnlock()
 
-				if exists && respChan != nil {
-					respChan <- msg
-				}
+			if exists && respChan != nil {
+				respChan <- msg
 			}
-
-			// TODO: Handle case where response channel is closed or full
-			// If the channel is full, we skip sending the message to avoid blocking (this is not ideal...)
-			// 	if exists {
-			// 		select {
-			// 		case respChan <- msg:
-			// 		default:
-			// 			// Channel might be full or closed
-			// 		}
-			// 	}
-			// }
 		}
 	}
 }
