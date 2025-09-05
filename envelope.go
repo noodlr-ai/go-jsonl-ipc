@@ -27,16 +27,15 @@ const (
 
 // Envelope wraps the "data" section of a message
 type Envelope[T any] struct {
-	Version   string    `json:"version"`    // "v1"
+	Version   string    `json:"version"`    // "envelope/v1"
 	RequestID string    `json:"request_id"` // RPC correlation
 	Kind      Kind      `json:"kind"`
 	TS        time.Time `json:"ts"`
-	Seq       uint64    `json:"seq"`                 // ordered per RequestID
-	ScopeSeq  uint64    `json:"scope_seq,omitempty"` // ordered per (TraceID,SpanID)
+	Seq       uint64    `json:"seq"` // ordered per RequestID
 
 	// Optional state & metadata
-	Status Status         `json:"status,omitempty"`
-	Meta   map[string]any `json:"meta,omitempty"`
+	Status Status `json:"status,omitempty"`
+	// Meta   map[string]any `json:"meta,omitempty"`
 
 	// Progress & results
 	Progress *ProgressData `json:"progress,omitempty"`
@@ -60,11 +59,11 @@ type ProgressData struct {
 
 // MessageError represents a non-terminal error for the entire request
 type MessageError struct {
-	Code         string `json:"code"`
-	Message      string `json:"message"`
-	Details      any    `json:"details,omitempty"`
-	Retryable    bool   `json:"retryable,omitempty"`
-	RetryAfterMs *int64 `json:"retry_after_ms,omitempty"`
+	Code    string `json:"code"`
+	Message string `json:"message"`
+	Details any    `json:"details,omitempty"`
+	// Retryable    bool   `json:"retryable,omitempty"`
+	// RetryAfterMs *int64 `json:"retry_after_ms,omitempty"`
 }
 
 type MessageWarn struct {

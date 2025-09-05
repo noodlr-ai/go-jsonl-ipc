@@ -35,13 +35,13 @@ func main() {
 
 	fmt.Println("Starting Python worker...")
 	// Set up event handlers
-	client.OnEvent("log", func(msg *jsonlipc.Message) {
+	client.OnNotification("log", func(msg *jsonlipc.Message) {
 		// TODO: this needs to be passed to the UI
 		fmt.Printf("Python log: %v\n", msg.Params)
 	})
 
 	// Ready event is not being propagated, so a context timeout is occurring
-	client.OnEvent("ready", func(msg *jsonlipc.Message) {
+	client.OnNotification("ready", func(msg *jsonlipc.Message) {
 		fmt.Println("Ready event received")
 		close(readyChan)
 	})
@@ -84,15 +84,22 @@ func main() {
 			return
 		}
 
-		s, err := jsonlipc.GetTypedResult[string](msg)
-		if err != nil {
-			log.Fatalf("Ping response is not a string: %v", msg.Data)
+		fmt.Println(msg)
+
+		type PingResponse struct {
+			Result string `json:"result"`
 		}
 
-		if s != "pong" {
-			log.Fatalf("Unexpected ping response: %v", s)
+		var pingResp PingResponse
+		if err := msg.UnmarshalDataPayload(&pingResp); err != nil {
+			log.Fatalf("Failed to unmarshal ping response: %v", err)
 		}
-		fmt.Println("Ping successful:", s)
+
+		if pingResp.Result != "pong" {
+			log.Fatalf("Unexpected ping response: %v", pingResp.Result)
+		}
+
+		fmt.Println("Ping successful:", pingResp.Result)
 		wg.Done()
 	})
 
@@ -113,14 +120,19 @@ func main() {
 			log.Fatalf("Add response is nil")
 			return
 		}
-		s, ok := msg.Data.(float64) // all JSON numbers are float64 when unmarshalled in Go
-		if !ok {
-			log.Fatalf("Add response is not a float64, got %[1]v (%[1]T) instead", msg.Data)
+
+		type AddResponse struct {
+			Result float64 `json:"result"`
 		}
-		if s != float64(8) {
-			log.Fatalf("Unexpected add response: %v", s)
+
+		var addResp AddResponse
+		if err := msg.UnmarshalDataPayload(&addResp); err != nil {
+			log.Fatalf("Failed to unmarshal add response: %v", err)
 		}
-		fmt.Println("Add successful:", s)
+		if addResp.Result != 8 {
+			log.Fatalf("Unexpected add response: %v", addResp.Result)
+		}
+		fmt.Println("Add successful:", addResp.Result)
 		wg.Done()
 	})
 
@@ -140,7 +152,16 @@ func main() {
 			log.Fatalf("Shutdown response is nil")
 			return
 		}
-		fmt.Println("Shutdown successful:", msg.Data)
+
+		var ShutdownResponse struct {
+			Result string `json:"result"`
+		}
+
+		if err := msg.UnmarshalDataPayload(&ShutdownResponse); err != nil {
+			log.Fatalf("Failed to unmarshal shutdown response: %v", err)
+		}
+
+		fmt.Println("Shutdown successful:", ShutdownResponse.Result)
 		wg.Done()
 	})
 

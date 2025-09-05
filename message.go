@@ -57,16 +57,16 @@ type TransportWarning struct {
 // Message represents a JSON Lines message for IPC communication (a union of various messages for simplicity)
 // Note: The Message struct is designed to be compatible with JSON Lines format because of the omitempty directives
 type Message struct {
-	ID         string             `json:"id,omitempty"`          // request<->response correlation; reuse on notifications
-	Type       MessageType        `json:"type"`                  // request|response|notification
-	Method     string             `json:"method,omitempty"`      // for requests (and optionally notifications as topic)
-	Params     json.RawMessage    `json:"params,omitempty"`      // request payload (opaque to transport)
-	Data       json.RawMessage    `json:"data,omitempty"`        // response/notification payload (opaque)
-	Error      *TransportError    `json:"error,omitempty"`       // transport-level errors only
-	Warnings   []TransportWarning `json:"warnings,omitempty"`    // transport warnings
-	TS         time.Time          `json:"ts,omitempty"`          // optional timestamp
-	Seq        uint64             `json:"seq,omitempty"`         // optional sequence
-	DataSchema string             `json:"data_schema,omitempty"` // "message/v1"
+	ID       string             `json:"id,omitempty"`       // request<->response correlation; reuse on notifications
+	Type     MessageType        `json:"type"`               // request|response|notification
+	Method   string             `json:"method,omitempty"`   // for requests (and optionally notifications as topic)
+	Params   json.RawMessage    `json:"params,omitempty"`   // request payload (opaque to transport)
+	Data     json.RawMessage    `json:"data,omitempty"`     // response/notification payload (opaque)
+	Error    *TransportError    `json:"error,omitempty"`    // transport-level errors only
+	Warnings []TransportWarning `json:"warnings,omitempty"` // transport warnings
+	TS       time.Time          `json:"ts,omitempty"`       // optional timestamp
+	Seq      uint64             `json:"seq,omitempty"`      // optional sequence
+	Schema   string             `json:"schema,omitempty"`   // "message/v1"
 }
 
 // Message represents a JSON Lines message for IPC communication (a union of various messages for simplicity)
@@ -214,8 +214,8 @@ func defaultTS(m *Message) {
 }
 
 func defaultSchema(m *Message) {
-	if m.DataSchema == "" {
-		m.DataSchema = "message/v1"
+	if m.Schema == "" {
+		m.Schema = "message/v1"
 	}
 }
 
@@ -231,11 +231,35 @@ func marshalOrPass(v any) (json.RawMessage, error) {
 	return json.RawMessage(b), err
 }
 
+// UnmarshalData will unmarshal the "data" property of the message struct
 func (m Message) UnmarshalData(dst any) error {
 	if len(m.Data) == 0 {
 		return fmt.Errorf("no data payload")
 	}
 	return json.Unmarshal(m.Data, dst)
+}
+
+// UnmarshalDataPayload will unmarshal a nested data object assuming a structure of message["data"]["data"] where the nested "data" property is the payload
+func (m Message) UnmarshalDataPayload(dst any) error {
+	if len(m.Data) == 0 {
+		return fmt.Errorf("no data payload")
+	}
+
+	// First unmarshal into a struct with a "data" field
+	var envelope struct {
+		Data json.RawMessage `json:"data"`
+	}
+
+	if err := json.Unmarshal(m.Data, &envelope); err != nil {
+		return fmt.Errorf("failed to unmarshal envelope: %w", err)
+	}
+
+	if len(envelope.Data) == 0 {
+		return fmt.Errorf("no nested data payload")
+	}
+
+	// Then unmarshal the nested data into the destination
+	return json.Unmarshal(envelope.Data, dst)
 }
 
 func (m Message) UnmarshalParams(dst any) error {
