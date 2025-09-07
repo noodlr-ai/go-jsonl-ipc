@@ -5,12 +5,11 @@ import "time"
 type Kind string
 
 const (
-	KindStarted   Kind = "started"   // lifecycle edge
-	KindProgress  Kind = "progress"  // periodic update
-	KindResult    Kind = "result"    // success for this scope
-	KindError     Kind = "error"     // failure for this scope
-	KindLog       Kind = "log"       // optional: stdout/stderr, warnings
-	KindHeartbeat Kind = "heartbeat" // liveness
+	KindStarted  Kind = "started"  // lifecycle edge
+	KindProgress Kind = "progress" // periodic update
+	KindResult   Kind = "result"   // success for this scope
+	KindError    Kind = "error"    // failure for this scope
+	KindLog      Kind = "log"      // optional: stdout/stderr, warnings
 )
 
 // Optional high-level state machine value you can compute in UIs/ops:

@@ -349,7 +349,7 @@ func TestTransportWarning(t *testing.T) {
 	}
 
 	// Add a transport warning
-	resp.Warnings = []TransportWarning{
+	resp.Warnings = []LogMessage{
 		{
 			Code:    "DEPRECATED_METHOD",
 			Level:   WarnWarn,

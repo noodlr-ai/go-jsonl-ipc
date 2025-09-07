@@ -40,33 +40,34 @@ const (
 	NotificationNotify NotificationMethod = "notify"
 )
 
-type WarningLevel string
+type LogLevel string
 
 const (
-	WarnInfo WarningLevel = "info"
-	WarnWarn WarningLevel = "warn"
+	WarnInfo  LogLevel = "info"
+	WarnError LogLevel = "error"
+	WarnWarn  LogLevel = "warn"
+	WarnDebug LogLevel = "debug"
 )
 
-type TransportWarning struct {
-	Code    string       `json:"code"`
-	Level   WarningLevel `json:"level"`
-	Message string       `json:"message"`
-	Details any          `json:"details,omitempty"` // optional structured data
+type LogMessage struct {
+	Level   LogLevel `json:"level"`
+	Message string   `json:"message"`
+	Details any      `json:"details,omitempty"` // optional structured data
 }
 
 // Message represents a JSON Lines message for IPC communication (a union of various messages for simplicity)
 // Note: The Message struct is designed to be compatible with JSON Lines format because of the omitempty directives
 type Message struct {
-	ID       string             `json:"id,omitempty"`       // request<->response correlation; reuse on notifications
-	Type     MessageType        `json:"type"`               // request|response|notification
-	Method   string             `json:"method,omitempty"`   // for requests (and optionally notifications as topic)
-	Params   json.RawMessage    `json:"params,omitempty"`   // request payload (opaque to transport)
-	Data     json.RawMessage    `json:"data,omitempty"`     // response/notification payload (opaque)
-	Error    *TransportError    `json:"error,omitempty"`    // transport-level errors only
-	Warnings []TransportWarning `json:"warnings,omitempty"` // transport warnings
-	TS       time.Time          `json:"ts,omitempty"`       // optional timestamp
-	Seq      uint64             `json:"seq,omitempty"`      // optional sequence
-	Schema   string             `json:"schema,omitempty"`   // "message/v1"
+	ID       string          `json:"id,omitempty"`       // request<->response correlation; reuse on notifications
+	Type     MessageType     `json:"type"`               // request|response|notification
+	TS       time.Time       `json:"ts"`                 // timestamp
+	Method   string          `json:"method,omitempty"`   // for requests (and optionally notifications as topic)
+	Params   json.RawMessage `json:"params,omitempty"`   // request payload (opaque to transport)
+	Data     json.RawMessage `json:"data,omitempty"`     // response/notification payload (opaque)
+	Error    *TransportError `json:"error,omitempty"`    // transport-level errors only
+	Warnings []LogMessage    `json:"warnings,omitempty"` // transport warnings
+	Seq      uint64          `json:"seq,omitempty"`      // optional sequence
+	Schema   string          `json:"schema,omitempty"`   // "message/v1"
 }
 
 // Message represents a JSON Lines message for IPC communication (a union of various messages for simplicity)
