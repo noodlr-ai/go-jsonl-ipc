@@ -349,25 +349,24 @@ func TestTransportWarning(t *testing.T) {
 	}
 
 	// Add a transport warning
-	resp.Warnings = []LogMessage{
+	resp.Messages = []LogMessage{
 		{
-			Code:    "DEPRECATED_METHOD",
 			Level:   WarnWarn,
 			Message: "This method is deprecated and will be removed in future versions",
 			Details: map[string]interface{}{"alternative": "use_new_method"},
 		},
 	}
 
-	if len(resp.Warnings) == 0 {
+	if len(resp.Messages) == 0 {
 		t.Error("Expected Warnings to be set")
 	}
 
-	if resp.Warnings[0].Code != "DEPRECATED_METHOD" {
-		t.Errorf("Expected warning code 'DEPRECATED_METHOD', got '%s'", resp.Warnings[0].Code)
+	if resp.Messages[0].Level != WarnWarn {
+		t.Errorf("Expected warning level 'warn', got '%s'", resp.Messages[0].Level)
 	}
 
-	if resp.Warnings[0].Message != "This method is deprecated and will be removed in future versions" {
-		t.Errorf("Expected warning message 'This method is deprecated and will be removed in future versions', got '%s'", resp.Warnings[0].Message)
+	if resp.Messages[0].Message != "This method is deprecated and will be removed in future versions" {
+		t.Errorf("Expected warning message 'This method is deprecated and will be removed in future versions', got '%s'", resp.Messages[0].Message)
 	}
 
 	// Test JSON marshaling with warning
@@ -382,11 +381,11 @@ func TestTransportWarning(t *testing.T) {
 		t.Fatalf("Failed to unmarshal message with warning: %v", err)
 	}
 
-	if len(msg.Warnings) == 0 {
+	if len(msg.Messages) == 0 {
 		t.Error("Expected Warnings to be preserved after JSON round-trip")
 	}
 
-	if msg.Warnings[0].Code != "DEPRECATED_METHOD" {
-		t.Errorf("Expected warning code 'DEPRECATED_METHOD' after unmarshaling, got '%s'", msg.Warnings[0].Code)
+	if msg.Messages[0].Level != WarnWarn {
+		t.Errorf("Expected warning level 'warn' after unmarshaling, got '%s'", msg.Messages[0].Level)
 	}
 }

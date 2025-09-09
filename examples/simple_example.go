@@ -84,8 +84,6 @@ func main() {
 			return
 		}
 
-		fmt.Println(msg)
-
 		type PingResponse struct {
 			Result string `json:"result"`
 		}

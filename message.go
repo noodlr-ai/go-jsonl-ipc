@@ -65,47 +65,10 @@ type Message struct {
 	Params   json.RawMessage `json:"params,omitempty"`   // request payload (opaque to transport)
 	Data     json.RawMessage `json:"data,omitempty"`     // response/notification payload (opaque)
 	Error    *TransportError `json:"error,omitempty"`    // transport-level errors only
-	Warnings []LogMessage    `json:"warnings,omitempty"` // transport warnings
+	Messages []LogMessage    `json:"messages,omitempty"` // transport messages
 	Seq      uint64          `json:"seq,omitempty"`      // optional sequence
 	Schema   string          `json:"schema,omitempty"`   // "message/v1"
 }
-
-// Message represents a JSON Lines message for IPC communication (a union of various messages for simplicity)
-// Note: The Message struct is designed to be compatible with JSON Lines format because of the omitempty directives
-// type Message struct {
-// 	ID     string          `json:"id,omitempty"`     // Unique identifier for request/response correlation
-// 	Type   MessageType     `json:"type"`             // Type of message
-// 	Method string          `json:"method,omitempty"` // Method name for requests
-// 	Params any             `json:"params,omitempty"` // Parameters for the method
-// 	Data   any             `json:"data,omitempty"`   // Result data for responses
-// 	Error  *TransportError `json:"error,omitempty"`  // Error information
-// }
-
-// GetTypeResult is a standalone generic function because Golang does not support generic methods
-// func GetTypedResult[T any](m *Message) (T, error) {
-// 	var zero T
-// 	if m.Data == nil {
-// 		return zero, fmt.Errorf("no result data")
-// 	}
-
-// 	// Try direct type assertion first (fastest path for simple types)
-// 	if result, ok := m.Data.(T); ok {
-// 		return result, nil
-// 	}
-
-// 	// Fall back to marshal/unmarshal for complex conversions
-// 	data, err := json.Marshal(m.Data)
-// 	if err != nil {
-// 		return zero, fmt.Errorf("failed to marshal result: %w", err)
-// 	}
-
-// 	var result T
-// 	if err := json.Unmarshal(data, &result); err != nil {
-// 		return zero, fmt.Errorf("failed to unmarshal result: %w", err)
-// 	}
-
-// 	return result, nil
-// }
 
 // NewRequest creates a new request message
 func NewRequest(id, method string, params any) (*Message, error) {
