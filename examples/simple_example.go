@@ -84,12 +84,23 @@ func main() {
 			return
 		}
 
+		// Use the UnmarshalEnvelope method to get the specific envelope type
+		env, err := msg.UnmarshalEnvelope()
+		if err != nil {
+			log.Fatalf("Failed to unmarshal envelope: %v", err)
+		}
+
+		resp, ok := env.(*jsonlipc.ResultEnvelope)
+		if !ok {
+			log.Fatalf("Unexpected envelope type: %T", env)
+		}
+
 		type PingResponse struct {
 			Result string `json:"result"`
 		}
 
 		var pingResp PingResponse
-		if err := msg.UnmarshalDataPayload(&pingResp); err != nil {
+		if err := resp.UnmarshalDataPayload(&pingResp); err != nil { // could use msg.UnmarshalDataPayload if we wanted to
 			log.Fatalf("Failed to unmarshal ping response: %v", err)
 		}
 
@@ -119,6 +130,7 @@ func main() {
 			return
 		}
 
+		// Use the UnmarshalDataPayload method to get the specific payload data without the envelope
 		type AddResponse struct {
 			Result float64 `json:"result"`
 		}

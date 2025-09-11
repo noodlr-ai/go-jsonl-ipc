@@ -50,9 +50,9 @@ const (
 )
 
 type LogMessage struct {
-	Level   LogLevel `json:"level"`
-	Message string   `json:"message"`
-	Details any      `json:"details,omitempty"` // optional structured data
+	Level   LogLevel        `json:"level"`
+	Message string          `json:"message"`
+	Details json.RawMessage `json:"details,omitempty"` // Can be map[string]any or ErrorMessage
 }
 
 // Message represents a JSON Lines message for IPC communication (a union of various messages for simplicity)
@@ -239,4 +239,66 @@ func (e *TransportError) UnmarshalDetails(dst any) error {
 		return nil
 	}
 	return json.Unmarshal(e.Details, dst)
+}
+
+// GetEnvelopeKind returns the kind of envelope in the Data field without fully unmarshaling
+func (m Message) GetEnvelopeKind() (EnvelopeKind, error) {
+	if len(m.Data) == 0 {
+		return "", fmt.Errorf("no data payload")
+	}
+
+	var envelope struct {
+		Kind EnvelopeKind `json:"kind"`
+	}
+	if err := json.Unmarshal(m.Data, &envelope); err != nil {
+		return "", fmt.Errorf("failed to unmarshal envelope kind: %w", err)
+	}
+
+	return envelope.Kind, nil
+}
+
+// UnmarshalEnvelope unmarshals Message.Data into the appropriate envelope type based on the "kind" field
+func (m Message) UnmarshalEnvelope() (Envelope, error) {
+	if len(m.Data) == 0 {
+		return nil, fmt.Errorf("no data payload")
+	}
+
+	// First, peek at the kind field to determine the envelope type
+	kind, err := m.GetEnvelopeKind()
+	if err != nil {
+		return nil, err
+	}
+
+	// Based on the kind, unmarshal into the specific envelope type
+	switch kind {
+	case EnvelopeKindResult:
+		var result ResultEnvelope
+		if err := json.Unmarshal(m.Data, &result); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal ResultEnvelope: %w", err)
+		}
+		return &result, nil
+
+	case EnvelopeKindError:
+		var errorEnv ErrorEnvelope
+		if err := json.Unmarshal(m.Data, &errorEnv); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal ErrorEnvelope: %w", err)
+		}
+		return &errorEnv, nil
+
+	case EnvelopeKindLog:
+		var logEnv LogEnvelope
+		if err := json.Unmarshal(m.Data, &logEnv); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal LogEnvelope: %w", err)
+		}
+		return &logEnv, nil
+
+	case EnvelopeKindProgress:
+		var progressEnv ProgressEnvelope
+		if err := json.Unmarshal(m.Data, &progressEnv); err != nil {
+			return nil, fmt.Errorf("failed to unmarshal ProgressEnvelope: %w", err)
+		}
+		return &progressEnv, nil
+	default:
+		return nil, fmt.Errorf("unknown envelope kind: %s", kind)
+	}
 }

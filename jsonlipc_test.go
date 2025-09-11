@@ -1,6 +1,7 @@
 package jsonlipc
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
@@ -353,7 +354,7 @@ func TestTransportWarning(t *testing.T) {
 		{
 			Level:   WarnWarn,
 			Message: "This method is deprecated and will be removed in future versions",
-			Details: map[string]interface{}{"alternative": "use_new_method"},
+			Details: json.RawMessage(`{"alternative": "use_new_method"}`),
 		},
 	}
 
