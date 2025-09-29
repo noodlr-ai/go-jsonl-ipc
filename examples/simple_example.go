@@ -153,6 +153,90 @@ func main() {
 	fmt.Println("Waiting for add response...")
 	wg.Wait()
 
+	// Call handler with progress events
+	fmt.Println("Testing progress handler...")
+	wg.Add(1)
+
+	num_steps, num_progress_notifications := 10, 10
+
+	// Set up progress notification handler
+
+	client.OnNotification("progress", func(msg *jsonlipc.Message) {
+		num_progress_notifications--
+	})
+
+	_, err = client.SendRequestWithTimeoutAndHandler("progress",
+		map[string]any{
+			"steps": num_steps,
+			"delay": 0.2,
+		},
+		5, // 5 second timeout
+		func(msg *jsonlipc.Message, err error) {
+			if err != nil {
+				log.Fatalf("Progress handler failed: %v", err)
+			}
+			if msg == nil {
+				log.Fatalf("Progress handler response is nil")
+				return
+			}
+
+			switch msg.Type {
+			case jsonlipc.MessageTypeNotification:
+				// Use the UnmarshalEnvelope method to get the specific envelope type
+				env, err := msg.UnmarshalEnvelope()
+				if err != nil {
+					log.Fatalf("Failed to unmarshal envelope: %v", err)
+				}
+
+				progress, ok := env.(*jsonlipc.ProgressEnvelope)
+				if !ok {
+					log.Fatalf("Unexpected envelope type: %T", env)
+				}
+
+				fmt.Printf("Progress: %.1f%% (%s) - %s\n",
+					progress.Progress.Ratio*100,
+					progress.Progress.Stage,
+					progress.Progress.Message)
+				num_steps = num_steps - 1
+			case jsonlipc.MessageTypeResponse:
+
+				if num_steps != 0 {
+					log.Fatalf("Expected more progress steps, but got final response early")
+				}
+
+				if num_progress_notifications != 0 {
+					log.Fatalf("Expected progress notifications to be 0, but got %d", num_steps-num_progress_notifications)
+				}
+
+				// Final response received
+				type ProgressResponse struct {
+					Result struct {
+						Status     string `json:"status"`
+						TotalSteps int    `json:"total_steps"`
+					} `json:"result"`
+				}
+
+				var progressResp ProgressResponse
+				if err := msg.UnmarshalDataPayload(&progressResp); err != nil {
+					log.Fatalf("Failed to unmarshal progress response: %v", err)
+				}
+
+				fmt.Printf("Progress handler completed: %s (total steps: %d)\n",
+					progressResp.Result.Status,
+					progressResp.Result.TotalSteps)
+				wg.Done()
+			default:
+				log.Fatalf("Unexpected message type: %v", msg.Type)
+			}
+		})
+
+	if err != nil {
+		log.Fatalf("Progress handler call failed: %v", err)
+	}
+
+	fmt.Println("Waiting for progress handler to complete...")
+	wg.Wait()
+
 	wg.Add(1)
 	_, err = client.SendRequestWithTimeoutAndHandler("shutdown", nil, 0, func(msg *jsonlipc.Message, err error) {
 		if err != nil {

@@ -276,8 +276,8 @@ func (c *Client) processMessages() {
 // handleMessage handles an incoming message
 func (c *Client) handleMessage(msg *Message) {
 
+	// All notifications (events, logs, etc.) are mirrored to an event handler if registered
 	if msg.Type == MessageTypeNotification {
-		// Handle event
 		if msg.Method != "" {
 			c.handlerMutex.RLock()
 			handler, exists := c.eventHandlers[msg.Method]
@@ -287,18 +287,19 @@ func (c *Client) handleMessage(msg *Message) {
 				go handler(msg) // Run handler in goroutine to avoid blocking
 			}
 		}
-	} else {
-		// MessageTypeResponse
-		if msg.ID != "" {
-			c.reqMutex.RLock()
-			respChan, exists := c.pendingReqs[msg.ID]
-			c.reqMutex.RUnlock()
+	}
 
-			if exists && respChan != nil {
-				respChan <- msg
-			}
+	// Request scoped messages (Responses, ProgressEvents, Warning, etc.)
+	if msg.ID != "" {
+		c.reqMutex.RLock()
+		respChan, exists := c.pendingReqs[msg.ID]
+		c.reqMutex.RUnlock()
+
+		if exists && respChan != nil {
+			respChan <- msg
 		}
 	}
+
 }
 
 // IsRunning returns whether the client and worker are running

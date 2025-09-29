@@ -71,7 +71,7 @@ def handle_progress(_: str, request_id: str, params: dict):
     total_steps = params.get("steps", 5)
     delay = params.get("delay", 0.1)
 
-    for i in range(total_steps + 1):
+    for i in range(total_steps):
         ratio = i / total_steps
         progress_env = make_progress_envelope(
             request_id=request_id,
