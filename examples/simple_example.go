@@ -96,7 +96,7 @@ func main() {
 		}
 
 		type PingResponse struct {
-			Result string `json:"result"`
+			Response string `json:"response"`
 		}
 
 		var pingResp PingResponse
@@ -104,11 +104,11 @@ func main() {
 			log.Fatalf("Failed to unmarshal ping response: %v", err)
 		}
 
-		if pingResp.Result != "pong" {
-			log.Fatalf("Unexpected ping response: %v", pingResp.Result)
+		if pingResp.Response != "pong" {
+			log.Fatalf("Unexpected ping response: %v", pingResp.Response)
 		}
 
-		fmt.Println("Ping successful:", pingResp.Result)
+		fmt.Println("Ping successful:", pingResp.Response)
 		wg.Done()
 	})
 
@@ -131,18 +131,16 @@ func main() {
 		}
 
 		// Use the UnmarshalDataPayload method to get the specific payload data without the envelope
-		type AddResponse struct {
-			Result float64 `json:"result"`
-		}
+		type AddResponse float64
 
 		var addResp AddResponse
 		if err := msg.UnmarshalDataPayload(&addResp); err != nil {
 			log.Fatalf("Failed to unmarshal add response: %v", err)
 		}
-		if addResp.Result != 8 {
-			log.Fatalf("Unexpected add response: %v", addResp.Result)
+		if addResp != 8 {
+			log.Fatalf("Unexpected add response: %v", addResp)
 		}
-		fmt.Println("Add successful:", addResp.Result)
+		fmt.Println("Add successful:", addResp)
 		wg.Done()
 	})
 
@@ -248,14 +246,14 @@ func main() {
 		}
 
 		var ShutdownResponse struct {
-			Result string `json:"result"`
+			Status string `json:"status"`
 		}
 
 		if err := msg.UnmarshalDataPayload(&ShutdownResponse); err != nil {
 			log.Fatalf("Failed to unmarshal shutdown response: %v", err)
 		}
 
-		fmt.Println("Shutdown successful:", ShutdownResponse.Result)
+		fmt.Println("Shutdown successful:", ShutdownResponse.Status)
 		wg.Done()
 	})
 
