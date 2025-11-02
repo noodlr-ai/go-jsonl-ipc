@@ -18,6 +18,10 @@ go mod init your-project
 go get noodlr-ai/go-jsonl-ipc
 ```
 
+## Run example test
+
+`go run examples/simple_example.go`
+
 ### In
 
 Message (union of message and event types)
