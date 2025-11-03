@@ -146,7 +146,6 @@ func (c *Client) sendRequestWithTimeoutAndHandler(method string, params any, tim
 		return "", fmt.Errorf("failed to send request: %w", err)
 	}
 
-	// fmt.Println("Request sent:", id, "Method:", method, "Params:", params)
 	go c.handleRequestResponse(id)
 	return id, nil
 }
@@ -263,7 +262,7 @@ func (c *Client) processMessages() {
 		case err := <-errChan:
 			if err != nil {
 				// Note: ReadChannel stops receiving messages once an error occurs; we may want for this to be more robust
-				fmt.Printf("Error in ReadMessage() from stdio stream; closing read channel: %v\n", err)
+				fmt.Printf("Error in go-json-lipc ReadMessage() from stdio stream; closing read channel: %v\n", err)
 				return
 			}
 			return

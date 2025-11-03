@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"runtime"
+	"strings"
 	"sync"
 	"time"
 )
@@ -206,23 +207,41 @@ func (w *Worker) Stream() *Stream {
 // handleStderr reads from stderr and logs errors
 func (w *Worker) handleStderr(stderr io.Reader, errChan chan<- error) {
 	scanner := bufio.NewScanner(stderr)
+	var errLines []string
+	var timer *time.Timer
 
 	for scanner.Scan() {
-		if err := scanner.Err(); err != nil {
-			w.Stop() // Stop the worker on stderr error
-			w.sendErrorWithoutWaiting(err, errChan)
-			return
-		}
+		line := scanner.Text()
+		if len(line) > 0 {
+			errLines = append(errLines, line)
 
-		// TODO: an error can span multiple lines; determine the best way to handle this
-		errText := scanner.Text()
-		if len(errText) == 0 {
-			continue
+			// Start or reset the debounce timer
+			if timer == nil {
+				timer = time.AfterFunc(100*time.Millisecond, func() {
+					w.Stop()
+					w.sendErrorWithoutWaiting(fmt.Errorf("error received from worker on stderr:\n%s",
+						strings.Join(errLines, "\n")), errChan)
+					errLines = nil
+					timer = nil
+				})
+			} else {
+				timer.Reset(100 * time.Millisecond)
+			}
 		}
+	}
 
-		w.Stop() // Stop the worker on stderr error
-		w.sendErrorWithoutWaiting(fmt.Errorf("error received from worker on stderr: %v", errText), errChan)
-		return
+	// Send any remaining accumulated lines
+	if timer != nil {
+		timer.Stop()
+	}
+	if len(errLines) > 0 {
+		w.Stop()
+		w.sendErrorWithoutWaiting(fmt.Errorf("error received from worker on stderr:\n%s",
+			strings.Join(errLines, "\n")), errChan)
+	}
+
+	if err := scanner.Err(); err != nil {
+		w.sendErrorWithoutWaiting(err, errChan)
 	}
 }
 
