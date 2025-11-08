@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"strings"
 	"sync"
 )
 
@@ -31,6 +32,9 @@ func (s *Stream) ReadMessage() (*Message, error) {
 	for {
 		if !s.scanner.Scan() {
 			if err := s.scanner.Err(); err != nil {
+				if strings.Contains(err.Error(), "file already closed") {
+					return nil, fmt.Errorf("python engine process has closed unexpectedly: %w", err)
+				}
 				return nil, fmt.Errorf("failed to scan line: %w", err)
 			}
 			// EOF reached
