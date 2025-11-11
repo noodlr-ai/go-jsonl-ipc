@@ -113,7 +113,7 @@ func (w *Worker) Start() (<-chan error, error) {
 
 	// Start goroutine to handle stderr
 	// Note: this is important for capturing process errors (e.g., when python.exe fails to launch the script because it doesn't exist)
-	errChan := make(chan error, 1)
+	errChan := make(chan error, 10)
 	go w.handleStderr(stderr, errChan)
 
 	// Note: we are not currently listening for the context to be cancelled; not sure if it is needed
