@@ -31,10 +31,10 @@ func (s *Stream) ReadMessage() (*Message, error) {
 	// Note: we use a for-loop and continue instead of calling ReadMessage() recursively when we encounter an empty line
 	for {
 		if !s.scanner.Scan() {
+			// once scanner.Scan() returns false, it will never return true again. The scanner has reached EOF or encountered an error.
 			if err := s.scanner.Err(); err != nil {
 				if strings.Contains(err.Error(), "file already closed") {
-					continue
-					// return nil, fmt.Errorf("python engine process has closed unexpectedly: %w", err)
+					return nil, fmt.Errorf("python engine process has closed unexpectedly: %w", err)
 				}
 				return nil, fmt.Errorf("failed to scan line: %w", err)
 			}
