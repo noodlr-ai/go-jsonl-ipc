@@ -125,7 +125,7 @@ func (w *Worker) Start() (<-chan error, error) {
 	// Note: we are not currently listening for the context to be cancelled; not sure if it is needed
 	go func(done chan error) {
 		defer close(done)
-		err := w.cmd.Wait()
+		err := w.cmd.Wait() // immediately closes stdout/stderr pipes upon return
 		// It was not a forced stop; it has exited unexpectedly
 		if !w.forcedStop && w.IsRunning() {
 			w.sendErrorWithoutWaiting(fmt.Errorf("worker process exited unexpectedly: %w", err), errChan)
@@ -200,7 +200,15 @@ func (w *Worker) Stop() error {
 func (w *Worker) IsRunning() bool {
 	w.mutex.RLock()
 	defer w.mutex.RUnlock()
-	return w.running
+
+	// Process hasn't been started yet
+	if w.cmd == nil || w.cmd.Process == nil {
+		return false
+	}
+
+	// ProcessState is only set after Wait() returns
+	// So if it's nil, the process is still running
+	return w.cmd.ProcessState == nil
 }
 
 // Stream returns the communication stream for the worker
@@ -224,7 +232,7 @@ func (w *Worker) handleStderr(stderr io.Reader, errChan chan<- error) {
 			// Start or reset the debounce timer
 			if timer == nil {
 				timer = time.AfterFunc(100*time.Millisecond, func() {
-					w.Stop()
+					// w.Stop()
 					w.sendErrorWithoutWaiting(fmt.Errorf("error received from worker on stderr:\n%s",
 						strings.Join(errLines, "\n")), errChan)
 					errLines = nil
@@ -241,7 +249,7 @@ func (w *Worker) handleStderr(stderr io.Reader, errChan chan<- error) {
 		timer.Stop()
 	}
 	if len(errLines) > 0 {
-		w.Stop()
+		// w.Stop()
 		w.sendErrorWithoutWaiting(fmt.Errorf("error received from worker on stderr:\n%s",
 			strings.Join(errLines, "\n")), errChan)
 	}
