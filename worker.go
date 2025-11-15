@@ -65,7 +65,8 @@ func (w *Worker) Start() (<-chan error, error) {
 	}
 
 	// Build command arguments
-	args := []string{w.config.ScriptPath}
+	// Use -u flag to force unbuffered binary stdin/stdout
+	args := []string{"-u", w.config.ScriptPath}
 	args = append(args, w.config.Args...)
 
 	// Create command with context
@@ -77,9 +78,14 @@ func (w *Worker) Start() (<-chan error, error) {
 	}
 
 	// Set environment variables if specified
+	env := os.Environ()
 	if len(w.config.Env) > 0 {
-		w.cmd.Env = w.config.Env
+		env = w.config.Env
 	}
+	// Force Python to use unbuffered I/O for stdin/stdout
+	// This prevents buffering issues when Python uses time.sleep()
+	env = append(env, "PYTHONUNBUFFERED=1")
+	w.cmd.Env = env
 
 	// Set up pipes for stdin, stdout, stderr
 	stdin, err := w.cmd.StdinPipe()
