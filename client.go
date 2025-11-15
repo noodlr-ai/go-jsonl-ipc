@@ -199,7 +199,6 @@ func (c *Client) handleRequestResponse(requestID string) {
 				}
 
 				if response.Type == MessageTypeResponse {
-					defer c.cleanupRequest(requestID)
 					return // Final response received; exit
 				}
 			}
