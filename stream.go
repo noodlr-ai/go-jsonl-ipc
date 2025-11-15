@@ -11,18 +11,20 @@ import (
 
 // Stream handles reading and writing JSON Lines messages
 type Stream struct {
-	scanner *bufio.Scanner
-	writer  io.Writer
-	mutex   sync.Mutex
+	scanner      *bufio.Scanner
+	writer       io.Writer
+	mutex        sync.Mutex
+	processAlive func() bool // Optional: function to check if underlying process is alive
 }
 
 // NewStream creates a new stream for JSON Lines communication
-func NewStream(reader io.Reader, writer io.Writer) *Stream {
+func NewStream(reader io.Reader, writer io.Writer, processAlive func() bool) *Stream {
 	sc := bufio.NewScanner(reader)
 	sc.Buffer(make([]byte, 0, 64*1024), 5*1024*1024) // allow big JSON lines (5MB)
 	return &Stream{
-		scanner: sc,
-		writer:  writer,
+		scanner:      sc,
+		writer:       writer,
+		processAlive: processAlive,
 	}
 }
 
@@ -31,14 +33,26 @@ func (s *Stream) ReadMessage() (*Message, error) {
 	// Note: we use a for-loop and continue instead of calling ReadMessage() recursively when we encounter an empty line
 	for {
 		if !s.scanner.Scan() {
+			isProcessAlive := s.processAlive()
 			// once scanner.Scan() returns false, it will never return true again. The scanner has reached EOF or encountered an error.
 			if err := s.scanner.Err(); err != nil {
 				if strings.Contains(err.Error(), "file already closed") {
-					return nil, fmt.Errorf("python engine process has closed unexpectedly: %w", err)
+					return nil, fmt.Errorf("error reading from Python's stdout; pipe has been closed: process alive=%v, error=%w", isProcessAlive, err)
 				}
-				return nil, fmt.Errorf("failed to scan line: %w", err)
+				return nil, fmt.Errorf("error reading from Python's stdout; pipe has been closed: process alive=%v, error=%w", isProcessAlive, err)
 			}
+
 			// EOF reached
+			if s.processAlive != nil {
+				if s.processAlive() {
+					// Process is still running, but we got EOF on stdout - this is a false positive
+					// This can happen with buffered I/O. With PYTHONUNBUFFERED=1 and python -u,
+					// this should not occur, but if it does, it indicates a real issue.
+					return nil, fmt.Errorf("EOF received but python process is still running (possible buffering issue)")
+				}
+			}
+
+			// No process check available, treat as normal EOF
 			return nil, io.EOF
 		}
 

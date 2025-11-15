@@ -104,7 +104,7 @@ func (w *Worker) Start() (<-chan error, error) {
 	}
 
 	// Create stream for communication
-	w.stream = NewStream(stdout, stdin)
+	w.stream = NewStream(stdout, stdin, w.IsRunning)
 
 	// Start the process
 	// Note: this only throws errors if the process fails to launch, so if python.exe launches then err is nil, even if the script python.exe attempts
