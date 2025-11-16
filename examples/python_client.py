@@ -3,8 +3,9 @@
 Example usage of the JSONL IPC Worker library.
 Shows different ways to use the worker in external modules.
 """
-
+import sys
 from dataclasses import dataclass
+import time
 from typing import Dict, Callable, Optional, TypeAlias, Type, Any
 from inspect import signature, Signature, Parameter
 from jsonlipc.worker import JSONLWorker, RequestMessage, NotificationMessage
@@ -296,6 +297,25 @@ def handle_default(ctx: HandlerContext) -> None:
     raise MethodNotFoundError(f"Method not found: {ctx.method}")
 
 
+def handle_stderr(message: str = "Test stderr message", ctx: Optional[HandlerContext] = None) -> None:
+    """Test handler that writes to stderr."""
+    # Write to stderr - this will be captured by the Go worker's handleStderr
+    sys.stderr.write(f"{message}\n")
+    sys.stderr.flush()  # Important: flush to ensure immediate delivery
+
+    return None
+
+
+def handle_stderr_multiline(ctx: Optional[HandlerContext] = None) -> dict:
+    """Test handler that writes multiple lines to stderr."""
+    sys.stderr.write("Error line 1\n")
+    sys.stderr.write("Error line 2\n")
+    sys.stderr.write("Error line 3\n")
+    sys.stderr.flush()
+
+    return None
+
+
 # Create worker with initial handlers
 engine = Engine({
     "add": add,
@@ -304,6 +324,8 @@ engine = Engine({
     "log": handle_log,
     "progress": handle_progress,
     "noop": handle_noop,
+    "stderr": handle_stderr,
+    "stderr_multiline": handle_stderr_multiline,
     "default": handle_default,
 })
 
