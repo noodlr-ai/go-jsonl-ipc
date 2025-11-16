@@ -63,7 +63,7 @@ func (s *Stream) ReadMessage() (*Message, error) {
 
 		var msg Message
 		if err := json.Unmarshal(line, &msg); err != nil {
-			return nil, fmt.Errorf("(warning) improperly formed message: %s", string(line))
+			return nil, &MalformedMessageError{Message: string(line)}
 		}
 
 		return &msg, nil
@@ -116,16 +116,24 @@ func (s *Stream) ReadChannel() (<-chan *Message, <-chan error) {
 				continue
 			}
 			if err == io.EOF {
-				return // child closed stdout; we'er done
+				return // child closed stdout; we're done
 			}
-			// send error if possible; otherwise drop to avoid blocking
+
+			// Check if it's a malformed message error and keep reading
+			if IsMalformedMessageError(err) {
+				select {
+				case errChan <- err:
+				default:
+				}
+				continue // Keep reading
+			}
+
+			// Fatal error (pipe closed, etc.)
 			select {
 			case errChan <- err:
-				// Note: it is possible for ReadMessage() to return a "file already closed" when the engine is shutdown
 			default:
 			}
-			// TODO: may want this to be a continue instead
-			return // stop draining on persistent error
+			return // stop on fatal errors only
 		}
 	}()
 

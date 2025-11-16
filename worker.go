@@ -113,8 +113,8 @@ func (w *Worker) Start() (<-chan error, error) {
 
 	// Start goroutine to handle stderr
 	// Note: this is important for capturing process errors (e.g., when python.exe fails to launch the script because it doesn't exist)
-	errChan := make(chan error, 10)
-	go w.handleStderr(stderr, errChan)
+	stdErrChan := make(chan error, 10)
+	go w.handleStderr(stderr, stdErrChan)
 
 	// Note: we are not currently listening for the context to be cancelled; not sure if it is needed
 	go func(done chan error) {
@@ -122,7 +122,7 @@ func (w *Worker) Start() (<-chan error, error) {
 		err := w.cmd.Wait() // immediately closes stdout/stderr pipes upon return
 		// It was not a forced stop; it has exited unexpectedly
 		if !w.forcedStop && w.IsRunning() {
-			w.sendErrorWithoutWaiting(fmt.Errorf("worker process exited unexpectedly: %w", err), errChan)
+			w.sendErrorWithoutWaiting(fmt.Errorf("worker process exited unexpectedly: %w", err), stdErrChan)
 			w.cleanup() // Clean up state
 			return
 		}
@@ -133,7 +133,7 @@ func (w *Worker) Start() (<-chan error, error) {
 		}
 	}(w.done)
 
-	return errChan, nil
+	return stdErrChan, nil
 }
 
 // Cleans-up state when stopped
@@ -212,8 +212,12 @@ func (w *Worker) Stream() *Stream {
 	return w.stream
 }
 
-// handleStderr reads from stderr and logs errors
-func (w *Worker) handleStderr(stderr io.Reader, errChan chan<- error) {
+// handleStderr reads from stderr and sends errors to the provided channel
+// Data sent to stderr is assumed to be error messages from the Python process and are not part of the JSON Lines IPC protocol
+// Note: may want to have the channel closed external to this function as part of the worker shutdown process
+// Note: stderr is often used as a channel for diagnostic messages, warnings, and non-critical information that is not part of the program's intended output.
+func (w *Worker) handleStderr(stderr io.Reader, stdErrChan chan<- error) {
+	defer close(stdErrChan)
 	scanner := bufio.NewScanner(stderr)
 	var errLines []string
 	var timer *time.Timer
@@ -226,8 +230,7 @@ func (w *Worker) handleStderr(stderr io.Reader, errChan chan<- error) {
 			// Start or reset the debounce timer
 			if timer == nil {
 				timer = time.AfterFunc(100*time.Millisecond, func() {
-					w.sendErrorWithoutWaiting(fmt.Errorf("error received from worker on stderr:\n%s",
-						strings.Join(errLines, "\n")), errChan)
+					w.sendErrorWithoutWaiting(fmt.Errorf("<--[Engine STDERR]: %s-->", strings.Join(errLines, "\n")), stdErrChan)
 					errLines = nil
 					timer = nil
 				})
@@ -242,12 +245,11 @@ func (w *Worker) handleStderr(stderr io.Reader, errChan chan<- error) {
 		timer.Stop()
 	}
 	if len(errLines) > 0 {
-		w.sendErrorWithoutWaiting(fmt.Errorf("error received from worker on stderr:\n%s",
-			strings.Join(errLines, "\n")), errChan)
+		w.sendErrorWithoutWaiting(fmt.Errorf("<--[Engine STDERR]: %s-->", strings.Join(errLines, "\n")), stdErrChan)
 	}
 
 	if err := scanner.Err(); err != nil {
-		w.sendErrorWithoutWaiting(err, errChan)
+		w.sendErrorWithoutWaiting(fmt.Errorf("<--[Engine STDERR]: %s-->", err), stdErrChan)
 	}
 }
 

@@ -1113,3 +1113,83 @@ func TestIntegrationStderrHandlingMultiline(t *testing.T) {
 		assert.True(t, strings.Count(stderrError.Error(), "\n") >= 3)
 	}
 }
+
+func TestIntegrationStdoutMalformedHandling(t *testing.T) {
+	client := setupClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	readyChan := make(chan struct{})
+
+	client.OnNotification("ready", func(msg *jsonlipc.Message) {
+		close(readyChan)
+	})
+
+	errChan, err := client.Start()
+	if err != nil {
+		t.Fatalf("Failed to start Python worker: %v", err)
+	}
+	defer client.Stop()
+
+	select {
+	case err := <-errChan:
+		t.Fatalf("Worker process exited unexpectedly: %v", err)
+	case <-readyChan:
+	case <-ctx.Done():
+		t.Fatalf("Timeout waiting for worker: %v", ctx.Err())
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	// Set up a listener for stderr errors
+	var stderrError error
+	go func() {
+		defer wg.Done()
+		select {
+		case err := <-errChan:
+			if err != nil && strings.Contains(err.Error(), "error received from worker on stderr") {
+				stderrError = err
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("Timeout waiting for stderr error")
+		}
+	}()
+
+	// Send request that will write to stderr
+	_, err = client.SendRequestWithTimeoutAndHandler("stdout_malformed", nil, 2, func(msg *jsonlipc.Message, err error) {
+		defer wg.Done()
+
+		assert.Equal(t, nil, err)
+		assert.Equal(t, msg.Type, jsonlipc.MessageTypeResponse)
+
+		// get the envelope from the response
+		env, err := msg.UnmarshalEnvelope()
+		assert.Equal(t, nil, err)
+
+		// envelope should be an ResultEnvelope
+		// Note: the error is captured via stderr, so we expect a ResultEnvelope here
+		result, ok := env.(*jsonlipc.ResultEnvelope)
+		assert.Equal(t, true, ok)
+
+		var resultData any
+		if err := result.UnmarshalDataPayload(&resultData); err != nil {
+			t.Errorf("Failed to unmarshal stderr response data: %v", err)
+			return
+		}
+
+		assert.Nil(t, resultData)
+	})
+
+	if err != nil {
+		t.Fatalf("Failed to send stderr_test request: %v", err)
+	}
+
+	wg.Wait()
+
+	// Verify we received the stderr error
+	if stderrError == nil {
+		t.Error("Expected to receive stderr error but got none")
+	} else {
+		assert.Contains(t, stderrError.Error(), "This is a test error message")
+	}
+}

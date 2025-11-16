@@ -316,6 +316,13 @@ def handle_stderr_multiline(ctx: Optional[HandlerContext] = None) -> dict:
     return None
 
 
+def handle_stdout_malformed(ctx: Optional[HandlerContext] = None) -> None:
+    """Test handler that triggers malformed message error."""
+    sys.stdout.write("This is not a valid JSON message\n")
+    sys.stdout.flush()
+    return None
+
+
 # Create worker with initial handlers
 engine = Engine({
     "add": add,
@@ -326,6 +333,7 @@ engine = Engine({
     "noop": handle_noop,
     "stderr": handle_stderr,
     "stderr_multiline": handle_stderr_multiline,
+    "stdout_malformed": handle_stdout_malformed,
     "default": handle_default,
 })
 

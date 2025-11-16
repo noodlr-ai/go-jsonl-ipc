@@ -49,7 +49,7 @@ func NewClient(config WorkerConfig) *Client {
 
 // Start starts the client and the underlying Python worker
 func (c *Client) Start() (<-chan error, error) {
-	errChan, err := c.worker.Start()
+	stdErrChan, err := c.worker.Start()
 	if err != nil {
 		return nil, fmt.Errorf("failed to start worker: %w", err)
 	}
@@ -59,7 +59,7 @@ func (c *Client) Start() (<-chan error, error) {
 	// to run or close properly.
 	go c.processMessages()
 
-	return errChan, nil
+	return stdErrChan, nil
 }
 
 // Stop stops the client and the underlying Python worker
@@ -259,12 +259,19 @@ func (c *Client) processMessages() {
 			}
 			c.handleMessage(msg)
 		case err := <-errChan:
+			// LEFT-OFF: Implementing a configurable log file so the user can capture these errors
+			// LEFT-OFF: may need someway for the user to notify that the process should be closed??
+			// LEFT-OFF: a bunch of my tests are now failing as I am reworking what happens when a malformed message is received.
 			if err != nil {
-				// Note: ReadChannel stops receiving messages once an error occurs; we may want for this to be more robust
-				fmt.Printf("Error in go-json-lipc ReadMessage() from stdio stream; closing read channel: %v\n", err)
+				c.worker.config.Logger.LogError(fmt.Sprintf("Error reading message from stream: %v", err))
 				return
 			}
-			return
+			// if err != nil {
+			// 	// Note: ReadChannel stops receiving messages once an error occurs; we may want for this to be more robust
+			// 	fmt.Printf("Error in go-json-lipc ReadMessage() from stdio stream; closing read channel: %v\n", err)
+			// 	return
+			// }
+			// return
 		case <-c.ctx.Done():
 			return
 		}
