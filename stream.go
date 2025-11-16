@@ -46,8 +46,6 @@ func (s *Stream) ReadMessage() (*Message, error) {
 			if s.processAlive != nil {
 				if s.processAlive() {
 					// Process is still running, but we got EOF on stdout - this is a false positive
-					// This can happen with buffered I/O. With PYTHONUNBUFFERED=1 and python -u,
-					// this should not occur, but if it does, it indicates a real issue.
 					return nil, fmt.Errorf("EOF received but python process is still running (possible buffering issue)")
 				}
 			}
