@@ -316,6 +316,13 @@ def handle_stderr_multiline(ctx: Optional[HandlerContext] = None) -> dict:
     return None
 
 
+def handle_stderr_no_newline(ctx: Optional[HandlerContext] = None) -> None:
+    """Test handler that writes to stderr without a newline."""
+    sys.stderr.write("Error message without newline")
+    sys.stderr.flush()  # Flushes the buffer but no \n sent
+    return None
+
+
 def handle_stdout_malformed(ctx: Optional[HandlerContext] = None) -> None:
     """Test handler that triggers malformed message error."""
     sys.stdout.write("This is not a valid JSON message\n")
@@ -333,6 +340,7 @@ engine = Engine({
     "noop": handle_noop,
     "stderr": handle_stderr,
     "stderr_multiline": handle_stderr_multiline,
+    "stderr_no_newline": handle_stderr_no_newline,
     "stdout_malformed": handle_stdout_malformed,
     "default": handle_default,
 })

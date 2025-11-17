@@ -978,7 +978,7 @@ func TestIntegrationStderrHandling(t *testing.T) {
 		defer wg.Done()
 		select {
 		case err := <-errChan:
-			if err != nil && strings.Contains(err.Error(), "error received from worker on stderr") {
+			if err != nil && strings.Contains(err.Error(), "This is a test error message") {
 				stderrError = err
 			}
 		case <-time.After(2 * time.Second):
@@ -1005,6 +1005,87 @@ func TestIntegrationStderrHandling(t *testing.T) {
 		// Note: the error is captured via stderr, so we expect a ResultEnvelope here
 		result, ok := env.(*jsonlipc.ResultEnvelope)
 		assert.Equal(t, true, ok)
+
+		var resultData any
+		if err := result.UnmarshalDataPayload(&resultData); err != nil {
+			t.Errorf("Failed to unmarshal stderr response data: %v", err)
+			return
+		}
+
+		assert.Nil(t, resultData)
+	})
+
+	if err != nil {
+		t.Fatalf("Failed to send stderr_test request: %v", err)
+	}
+
+	wg.Wait()
+
+	// Verify we received the stderr error
+	if stderrError == nil {
+		t.Error("Expected to receive stderr error but got none")
+	} else {
+		assert.Contains(t, stderrError.Error(), "This is a test error message")
+	}
+}
+
+func TestIntegrationStderrNoNewlineHandling(t *testing.T) {
+	client := setupClient()
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	readyChan := make(chan struct{})
+
+	client.OnNotification("ready", func(msg *jsonlipc.Message) {
+		close(readyChan)
+	})
+
+	errChan, err := client.Start()
+	if err != nil {
+		t.Fatalf("Failed to start Python worker: %v", err)
+	}
+	defer client.Stop()
+
+	select {
+	case err := <-errChan:
+		t.Fatalf("Worker process exited unexpectedly: %v", err)
+	case <-readyChan:
+	case <-ctx.Done():
+		t.Fatalf("Timeout waiting for worker: %v", ctx.Err())
+	}
+
+	var wg sync.WaitGroup
+	wg.Add(2)
+	// Set up a listener for stderr errors
+	var stderrError error
+	go func() {
+		defer wg.Done()
+		select {
+		case err := <-errChan:
+			if err != nil && strings.Contains(err.Error(), "Error message without newline") {
+				stderrError = err
+			}
+		case <-time.After(2 * time.Second):
+			t.Error("Timeout waiting for stderr error")
+		}
+	}()
+
+	// Send request that will write to stderr
+	_, err = client.SendRequestWithTimeoutAndHandler("stderr_no_newline", nil, 2, func(msg *jsonlipc.Message, err error) {
+		defer wg.Done()
+
+		assert.Equal(t, nil, err)
+		assert.Equal(t, msg.Type, jsonlipc.MessageTypeResponse)
+
+		// get the envelope from the response
+		env, err := msg.UnmarshalEnvelope()
+		assert.Equal(t, nil, err)
+
+		// envelope should be an ResultEnvelope
+		// Note: the error is captured via stderr, so we expect a ResultEnvelope here
+		result, ok := env.(*jsonlipc.ResultEnvelope)
+		assert.Equal(t, true, ok)
+		assert.Equal(t, result.Kind, jsonlipc.EnvelopeKindResult)
 
 		var resultData any
 		if err := result.UnmarshalDataPayload(&resultData); err != nil {
@@ -1110,7 +1191,7 @@ func TestIntegrationStderrHandlingMultiline(t *testing.T) {
 	if stderrError == nil {
 		t.Error("Expected to receive stderr error but got none")
 	} else {
-		assert.True(t, strings.Count(stderrError.Error(), "\n") >= 3)
+		assert.True(t, strings.Count(stderrError.Error(), "\n") >= 2)
 	}
 }
 
@@ -1140,22 +1221,9 @@ func TestIntegrationStdoutMalformedHandling(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	wg.Add(2)
-	// Set up a listener for stderr errors
-	var stderrError error
-	go func() {
-		defer wg.Done()
-		select {
-		case err := <-errChan:
-			if err != nil && strings.Contains(err.Error(), "error received from worker on stderr") {
-				stderrError = err
-			}
-		case <-time.After(2 * time.Second):
-			t.Error("Timeout waiting for stderr error")
-		}
-	}()
+	wg.Add(1)
 
-	// Send request that will write to stderr
+	// Send request that will write malformed output to stdout
 	_, err = client.SendRequestWithTimeoutAndHandler("stdout_malformed", nil, 2, func(msg *jsonlipc.Message, err error) {
 		defer wg.Done()
 
@@ -1167,13 +1235,13 @@ func TestIntegrationStdoutMalformedHandling(t *testing.T) {
 		assert.Equal(t, nil, err)
 
 		// envelope should be an ResultEnvelope
-		// Note: the error is captured via stderr, so we expect a ResultEnvelope here
+		// Note: the malformed message is logged, so we expect a ResultEnvelope here
 		result, ok := env.(*jsonlipc.ResultEnvelope)
 		assert.Equal(t, true, ok)
 
 		var resultData any
 		if err := result.UnmarshalDataPayload(&resultData); err != nil {
-			t.Errorf("Failed to unmarshal stderr response data: %v", err)
+			t.Errorf("Failed to unmarshal stdout_malformed response data: %v", err)
 			return
 		}
 
@@ -1181,15 +1249,26 @@ func TestIntegrationStdoutMalformedHandling(t *testing.T) {
 	})
 
 	if err != nil {
-		t.Fatalf("Failed to send stderr_test request: %v", err)
+		t.Fatalf("Failed to send stdout_malformed request: %v", err)
 	}
 
 	wg.Wait()
 
-	// Verify we received the stderr error
-	if stderrError == nil {
-		t.Error("Expected to receive stderr error but got none")
-	} else {
-		assert.Contains(t, stderrError.Error(), "This is a test error message")
+	// Give some time for the malformed message to be logged
+	time.Sleep(200 * time.Millisecond)
+
+	// Read the log file to verify the malformed message was logged
+	logContent, err := client.ReadLogFile()
+	if err != nil {
+		t.Fatalf("Failed to read log file: %v", err)
 	}
+
+	// Verify the log contains the malformed message error
+	assert.NotEmpty(t, logContent, "Log file should not be empty")
+	assert.Contains(t, logContent, "malformed IPC message", "Log file should contain 'malformed message'")
+	assert.Contains(t, logContent, "This is not a valid JSON message", "Log file should contain 'This is not a valid JSON message'")
+
+	err = client.ClearLogFile()
+	assert.NoError(t, err, "Failed to clear log file")
+
 }

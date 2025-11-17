@@ -10,7 +10,7 @@ type MalformedMessageError struct {
 }
 
 func (e *MalformedMessageError) Error() string {
-	return fmt.Sprintf("malformed IPC message received: (error: %s)", e.Message)
+	return fmt.Sprintf("malformed IPC message received: \"%s\"", e.Message)
 }
 
 func (e *MalformedMessageError) Unwrap() error {

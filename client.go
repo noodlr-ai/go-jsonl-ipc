@@ -259,19 +259,10 @@ func (c *Client) processMessages() {
 			}
 			c.handleMessage(msg)
 		case err := <-errChan:
-			// LEFT-OFF: Implementing a configurable log file so the user can capture these errors
-			// LEFT-OFF: may need someway for the user to notify that the process should be closed??
-			// LEFT-OFF: a bunch of my tests are now failing as I am reworking what happens when a malformed message is received.
 			if err != nil {
-				c.worker.config.Logger.LogError(fmt.Sprintf("Error reading message from stream: %v", err))
-				return
+				c.worker.Log(fmt.Sprintf("Error reading message from stream: %v", err))
+				continue
 			}
-			// if err != nil {
-			// 	// Note: ReadChannel stops receiving messages once an error occurs; we may want for this to be more robust
-			// 	fmt.Printf("Error in go-json-lipc ReadMessage() from stdio stream; closing read channel: %v\n", err)
-			// 	return
-			// }
-			// return
 		case <-c.ctx.Done():
 			return
 		}
@@ -310,6 +301,16 @@ func (c *Client) handleMessage(msg *Message) {
 // IsRunning returns whether the client and worker are running
 func (c *Client) IsRunning() bool {
 	return c.worker.IsRunning()
+}
+
+// ReadLogFile reads the content of the worker's log file
+func (c *Client) ReadLogFile() (string, error) {
+	return c.worker.ReadLogFile()
+}
+
+// ClearLogFile clears the worker's log file
+func (c *Client) ClearLogFile() error {
+	return c.worker.ClearLogFile()
 }
 
 // CancelRequest cancels a pending request

@@ -5,8 +5,10 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"sync"
@@ -19,6 +21,7 @@ type WorkerConfig struct {
 	ScriptPath string        // Path to Python script to execute
 	Args       []string      // Additional arguments for the Python script
 	WorkingDir string        // Working directory for the process
+	LogDir     string        // Directory for log files
 	Timeout    time.Duration // Timeout for process operations
 	Env        []string      // Environment variables as "key=value" strings
 }
@@ -34,6 +37,8 @@ type Worker struct {
 	running    bool
 	forcedStop bool
 	done       chan error // Used with cmd.Wait() to signal that the process has exited
+	logger     *log.Logger
+	logFile    *os.File
 }
 
 // NewWorker creates a new worker with the given configuration
@@ -63,6 +68,39 @@ func (w *Worker) Start() (<-chan error, error) {
 	if w.running {
 		return nil, fmt.Errorf("worker is already running")
 	}
+
+	logDir := w.config.LogDir
+	// Check if worker.LogDir exists; if not, create it
+	if logDir != "" {
+		// Convert to absolute path
+		absLogDir, err := filepath.Abs(logDir)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve log directory path: %w", err)
+		}
+		logDir = absLogDir
+
+		if _, err := os.Stat(logDir); os.IsNotExist(err) {
+			if err := os.MkdirAll(logDir, 0755); err != nil {
+				return nil, fmt.Errorf("failed to create log directory: %w", err)
+			}
+		}
+	} else {
+		// If LogDir is not specified, set it to the ScriptPath directory
+		absScriptPath, err := filepath.Abs(w.config.ScriptPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to resolve script path: %w", err)
+		}
+		logDir = filepath.Dir(absScriptPath)
+	}
+
+	// Initialize logger
+	logFilePath := filepath.Join(logDir, "jsonlipc.log")
+	logFile, err := os.OpenFile(logFilePath, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return nil, fmt.Errorf("failed to open log file: %w", err)
+	}
+	w.logFile = logFile
+	w.logger = log.New(w.logFile, "", log.LstdFlags)
 
 	// Build command arguments
 	args := []string{w.config.ScriptPath}
@@ -143,6 +181,13 @@ func (w *Worker) cleanup() {
 	w.stream = nil
 	w.cmd = nil
 	w.running = false
+
+	// Close log file if open
+	if w.logFile != nil {
+		w.logFile.Close()
+		w.logFile = nil
+		w.logger = nil
+	}
 }
 
 // Stop stops the Python worker process
@@ -222,6 +267,7 @@ func (w *Worker) handleStderr(stderr io.Reader, stdErrChan chan<- error) {
 	var errLines []string
 	var timer *time.Timer
 
+	// LEFT-OFF: adding a new issue for handling stderr lines without newlines (this requires a custom split function and timeout functionality)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if len(line) > 0 {
@@ -230,7 +276,9 @@ func (w *Worker) handleStderr(stderr io.Reader, stdErrChan chan<- error) {
 			// Start or reset the debounce timer
 			if timer == nil {
 				timer = time.AfterFunc(100*time.Millisecond, func() {
-					w.sendErrorWithoutWaiting(fmt.Errorf("<--[Engine STDERR]: %s-->", strings.Join(errLines, "\n")), stdErrChan)
+					err := fmt.Errorf("<--[Engine STDERR]: %s-->", strings.Join(errLines, "\n"))
+					w.Log(err.Error())
+					w.sendErrorWithoutWaiting(err, stdErrChan)
 					errLines = nil
 					timer = nil
 				})
@@ -245,11 +293,15 @@ func (w *Worker) handleStderr(stderr io.Reader, stdErrChan chan<- error) {
 		timer.Stop()
 	}
 	if len(errLines) > 0 {
-		w.sendErrorWithoutWaiting(fmt.Errorf("<--[Engine STDERR]: %s-->", strings.Join(errLines, "\n")), stdErrChan)
+		err := fmt.Errorf("<--[Engine STDERR]: %s-->", strings.Join(errLines, "\n"))
+		w.Log(err.Error())
+		w.sendErrorWithoutWaiting(err, stdErrChan)
 	}
 
 	if err := scanner.Err(); err != nil {
-		w.sendErrorWithoutWaiting(fmt.Errorf("<--[Engine STDERR]: %s-->", err), stdErrChan)
+		err := fmt.Errorf("<--[Engine STDERR]: %s-->", strings.Join(errLines, "\n"))
+		w.Log(err.Error())
+		w.sendErrorWithoutWaiting(err, stdErrChan)
 	}
 }
 
@@ -259,4 +311,64 @@ func (w *Worker) sendErrorWithoutWaiting(err error, errChan chan<- error) {
 	default:
 		// Channel full, error dropped but shutdown still happens
 	}
+}
+
+// Log sends a log message to the worker's LogDir
+func (w *Worker) Log(message string) {
+	w.mutex.RLock()
+	logger := w.logger
+	w.mutex.RUnlock()
+
+	if logger != nil {
+		logger.Println(message)
+	}
+}
+
+func (w *Worker) ClearLogFile() error {
+	w.mutex.RLock()
+	logFile := w.logFile
+	w.mutex.RUnlock()
+
+	if logFile == nil {
+		return fmt.Errorf("log file is not available")
+	}
+
+	// Close current log file
+	logFile.Close()
+
+	// Truncate the log file
+	err := os.Truncate(logFile.Name(), 0)
+	if err != nil {
+		return fmt.Errorf("failed to truncate log file: %w", err)
+	}
+
+	// Reopen the log file for appending
+	newLogFile, err := os.OpenFile(logFile.Name(), os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0644)
+	if err != nil {
+		return fmt.Errorf("failed to reopen log file: %w", err)
+	}
+
+	w.mutex.Lock()
+	w.logFile = newLogFile
+	w.logger = log.New(w.logFile, "", log.LstdFlags)
+	w.mutex.Unlock()
+
+	return nil
+}
+
+func (w *Worker) ReadLogFile() (string, error) {
+	w.mutex.RLock()
+	logFile := w.logFile
+	w.mutex.RUnlock()
+
+	if logFile == nil {
+		return "", fmt.Errorf("log file is not available")
+	}
+
+	data, err := os.ReadFile(logFile.Name())
+	if err != nil {
+		return "", fmt.Errorf("failed to read log file: %w", err)
+	}
+
+	return string(data), nil
 }
