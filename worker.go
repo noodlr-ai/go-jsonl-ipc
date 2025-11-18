@@ -298,6 +298,9 @@ func (w *Worker) handleStderr(stderr io.Reader, stdErrChan chan<- error) {
 	}
 
 	if err := scanner.Err(); err != nil {
+		if err == io.EOF {
+			return
+		}
 		err := fmt.Errorf("<--[Engine STDERR]: %s-->", strings.Join(errLines, "\n"))
 		w.Log(err.Error())
 		w.sendErrorWithoutWaiting(err, stdErrChan)
