@@ -267,7 +267,6 @@ func (w *Worker) handleStderr(stderr io.Reader, stdErrChan chan<- error) {
 	var errLines []string
 	var timer *time.Timer
 
-	// LEFT-OFF: adding a new issue for handling stderr lines without newlines (this requires a custom split function and timeout functionality)
 	for scanner.Scan() {
 		line := scanner.Text()
 		if len(line) > 0 {
