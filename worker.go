@@ -192,7 +192,6 @@ func (w *Worker) cleanup() {
 
 // Stop stops the Python worker process
 func (w *Worker) Stop() error {
-
 	w.mutex.Lock()
 	w.forcedStop = true
 	if !w.running {
@@ -200,8 +199,6 @@ func (w *Worker) Stop() error {
 		return nil
 	}
 
-	// Cancel context to signal shutdown
-	w.cancel()
 	w.mutex.Unlock()
 
 	// Try graceful shutdown first
@@ -218,17 +215,17 @@ func (w *Worker) Stop() error {
 			if err := w.cmd.Process.Signal(os.Interrupt); err != nil {
 				w.Log(fmt.Sprintf("failed to send interrupt signal to worker process: %v", err))
 				// If graceful shutdown fails on Unix, force kill
-				w.cmd.Process.Kill() // Note: this will cause Wait() to unblock as expected
+				w.cancel() // Cancelling the context sends a SIGKILL
 			}
 		}
 
 		select {
 		case <-w.done:
-			return nil // Process finished gracefully
+			// Process exited gracefully, nothing to do
 		case <-time.After(w.config.Timeout):
 			// Timeout reached, force kill
-			w.cmd.Process.Kill()
-			<-w.done // Wait for process to be killed
+			w.cancel() // Cancelling the context sends a SIGKILL
+			<-w.done   // Wait for process to be killed
 		}
 	}
 
