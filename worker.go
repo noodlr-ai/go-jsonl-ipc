@@ -216,6 +216,7 @@ func (w *Worker) Stop() error {
 		} else {
 			// On Unix-like systems, use SIGINT
 			if err := w.cmd.Process.Signal(os.Interrupt); err != nil {
+				w.Log(fmt.Sprintf("failed to send interrupt signal to worker process: %v", err))
 				// If graceful shutdown fails on Unix, force kill
 				w.cmd.Process.Kill() // Note: this will cause Wait() to unblock as expected
 			}
